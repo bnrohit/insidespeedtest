@@ -29,6 +29,23 @@
   <hr>
   <h3>School and VLAN source-IP inventory</h3>
   <p>Each row identifies a school/site or a specific VLAN subnet. Only upload verified routes/DHCP subnets. VLAN detection is inferred from the source IP, not read from the browser.</p>
+  <div class="form-grid">
+    <label>Check an observed school IP<input id="lookup-ip" placeholder="10.x.y.z" autocomplete="off"></label>
+    <div class="actions action-bottom"><button id="lookup-btn" class="secondary-btn" type="button">Identify school / VLAN</button></div>
+  </div>
+  <div id="lookup-result" class="caption" role="status">Use this to confirm that a real client IP maps to the correct campus and VLAN.</div>
+  <details class="inventory-helper"><summary>Add a school or VLAN subnet</summary>
+    <p class="caption">This adds a row to the CSV editor only. Select “Validate &amp; save inventory” afterwards to activate it.</p>
+    <div class="form-grid">
+      <label>Entry type<select id="mapping-scope"><option value="vlan">VLAN subnet</option><option value="school">School-wide fallback</option></select></label>
+      <label>School / site code<input id="mapping-school" maxlength="100" placeholder="LNE"></label>
+      <label>VLAN ID (only for VLAN subnet)<input id="mapping-vlan" type="number" min="1" max="4094" placeholder="48"></label>
+      <label>Exact CIDR<input id="mapping-cidr" maxlength="49" placeholder="10.x.y.0/24"></label>
+      <label>Network label<input id="mapping-label" maxlength="200" placeholder="Staff"></label>
+    </div>
+    <button id="append-mapping" type="button" class="secondary-btn">Add row to editor</button>
+    <div id="append-mapping-status" class="caption" role="status"></div>
+  </details>
   <textarea id="network-csv" rows="11" spellcheck="false" aria-label="Private school VLAN CSV inventory"></textarea>
   <div class="actions"><button id="save-networks" class="secondary-btn" type="button">Validate &amp; save inventory</button><a href="/api/admin/config/networks.csv" class="secondary-btn">Export private CSV</a></div>
   <div id="network-status" class="caption" role="status"></div>

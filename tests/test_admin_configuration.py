@@ -16,7 +16,8 @@ def client(tmp_path):
     agents=tmp_path / 'incoming-agents.csv'
     agents.write_text('agent_id,token_sha256,allowed_cidr\n')
     settings=Settings(db_path=str(tmp_path/'data'/'results.db'),mapping_path=str(mapping),
-                      agents_path=str(agents),admin_username='admin',admin_password='TESTPASSWORD_LONG_123456')
+                      agents_path=str(agents),admin_username='admin',admin_password='TESTPASSWORD_LONG_123456',
+                      admin_client_cidrs='10.12.0.0/16')
     app=create_app(settings)
     return TestClient(app,base_url='https://testserver',client=('10.12.48.50',4444)),settings
 
@@ -27,20 +28,20 @@ def test_admin_only_and_persistent_smtp(client):
     assert c.get(path).status_code==401
     assert c.put(path,json={'host':'mail.test.local'}).status_code==401
     admin=('admin','TESTPASSWORD_LONG_123456')
-    response=c.put(path,auth=admin,json={'host':'10.250.32.28','port':25,'tls_mode':'none',
+    response=c.put(path,auth=admin,json={'host':'127.0.0.1','port':25,'tls_mode':'starttls',
                            'username':'','sender':'speedtest@example.org','recipients':'noc@example.org',
                            'password':'SOME-LOCAL-SECRET','dedupe_seconds':86400,
                            'email_agent_results':True,'email_browser_results':True})
     assert response.status_code==200,response.text
     assert 'SOME-LOCAL-SECRET' not in response.text
     assert response.json()['password_configured']
-    assert c.get(path,auth=admin).json()['host']=='10.250.32.28'
+    assert c.get(path,auth=admin).json()['host']=='127.0.0.1'
     cfgfile=Path(settings.db_path).parent/'managed'/'smtp.json'
     assert cfgfile.exists() and cfgfile.stat().st_mode & 0o077==0
     after_restart=TestClient(create_app(settings),base_url='https://testserver',client=('10.12.48.50',4444))
-    assert after_restart.get(path,auth=admin).json()['host']=='10.250.32.28'
+    assert after_restart.get(path,auth=admin).json()['host']=='127.0.0.1'
     assert after_restart.get(path,auth=admin).json()['password_configured'] is True
-    assert c.put(path,auth=admin,json={'host':'10.250.32.28','port':25,'tls_mode':'none','username':'login'}).status_code==422
+    assert c.put(path,auth=admin,json={'host':'127.0.0.1','port':25,'tls_mode':'none','username':'login'}).status_code==422
     assert c.post('/api/admin/config/smtp/test',auth=admin).status_code in {502,429}
     assert c.post('/api/admin/config/smtp/test').status_code==401
 
@@ -103,3 +104,32 @@ def test_admin_csrf_origin_checks(client):
         headers={'Origin':'https://testserver','Sec-Fetch-Site':'same-origin'}).status_code==200
     assert c.post('/api/admin/config/smtp/test',auth=auth,
         headers={'Origin':'https://attacker.example','Sec-Fetch-Site':'cross-site'}).status_code==403
+
+
+def test_admin_network_lookup_and_ip_acl(client):
+    c, settings=client
+    admin=('admin','TESTPASSWORD_LONG_123456')
+    r=c.get('/api/admin/config/lookup?ip=10.12.48.53',auth=admin)
+    assert r.status_code==200
+    assert r.json()['school']=='LNE' and r.json()['vlan']=='48'
+    assert c.get('/api/admin/config/lookup?ip=8.8.8.8',auth=admin).status_code==422
+    assert c.get('/api/admin/config/lookup?ip=garbage',auth=admin).status_code==422
+    outside=TestClient(create_app(settings),base_url='https://testserver',client=('10.11.1.20',1234))
+    assert outside.get('/api/admin/config/smtp',auth=admin).status_code==403
+    assert outside.get('/api/identity').status_code==200
+
+
+def test_plain_smtp_never_keeps_a_password(client):
+    c,settings=client
+    auth=('admin','TESTPASSWORD_LONG_123456')
+    path='/api/admin/config/smtp'
+    assert c.put(path,auth=auth,json={'host':'mail.test.local','tls_mode':'none',
+               'password':'unsafe'}).status_code==422
+    assert c.put(path,auth=auth,json={'host':'mail.test.local','tls_mode':'starttls',
+               'password':'some-secret','sender':'speedtest@example.org',
+               'recipients':'admin@example.org'}).status_code==200
+    saved=c.put(path,auth=auth,json={'host':'127.0.0.1','port':25,'tls_mode':'none',
+               'sender':'speedtest@example.org','recipients':'admin@example.org'})
+    assert saved.status_code==200,saved.text
+    assert saved.json()['password_configured'] is False
+    assert 'some-secret' not in (Path(settings.db_path).parent/'managed'/'smtp.json').read_text()

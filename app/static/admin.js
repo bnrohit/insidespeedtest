@@ -124,3 +124,35 @@ el('copy-agent').addEventListener('click',async()=>{
   catch(err){el('agents-status').textContent='Select and copy token manually.';}
 });
 loadConfig();
+
+// Query the exact, active mapping without touching production networking.
+el('lookup-btn').addEventListener('click',async()=>{
+  const ip=el('lookup-ip').value.trim();
+  if(!ip){el('lookup-result').textContent='Enter a client IP first.';return;}
+  try{
+    const response=await fetch('/api/admin/config/lookup?ip='+encodeURIComponent(ip),{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Lookup failed');
+    el('lookup-result').textContent=`${data.client_ip} → ${data.school} / VLAN ${data.vlan} — ${data.network_label}`;
+  }catch(err){el('lookup-result').textContent='Lookup failed: '+err.message;}
+});
+const csvEscape=(s)=>'"'+s.replaceAll('"','""')+'"';
+el('append-mapping').addEventListener('click',()=>{
+  const scope=el('mapping-scope').value;
+  const school=el('mapping-school').value.trim();
+  const vlan=scope==='vlan'?el('mapping-vlan').value.trim():'';
+  const cidr=el('mapping-cidr').value.trim();
+  const label=el('mapping-label').value.trim();
+  if(!school||!cidr||(scope==='vlan' && !(Number.isInteger(Number(vlan)) && +vlan>=1 && +vlan<=4094))){
+    el('append-mapping-status').textContent='Enter school, valid VLAN (when applicable), and exact CIDR.';return;
+  }
+  if([school,label,cidr].some(x=>/[\r\n\0]/.test(x))){
+    el('append-mapping-status').textContent='Line breaks are not allowed in CSV cells.';return;
+  }
+  const row=[scope,school,vlan,cidr,label].map(csvEscape).join(',');
+  const editor=el('network-csv');
+  const current=editor.value.trimEnd();
+  editor.value=(current ? current+'\n' : 'scope,school,vlan,cidr,label\n')+row+'\n';
+  el('append-mapping-status').textContent='Added to editor. Now select Validate & save inventory. Existing settings are unchanged until saved.';
+  editor.focus();
+});

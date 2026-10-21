@@ -1,0 +1,26 @@
+# Optional, tested-version HTTPS reverse proxy. Run ONLY if no existing host
+# Nginx or another service is already bound to TCP/443.
+# docker compose -f compose.yaml -f compose.nginx.yaml up -d --build
+services:
+  nginx:
+    image: nginx:1.30.6-alpine
+    container_name: gmcs-speedtest-nginx
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      insidespeedtest:
+        condition: service_healthy
+    volumes:
+      - ./deploy/nginx.container.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./private/tls:/etc/ssl/gmcs-speedtest:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,mode=0755
+      - /var/run:size=8m,mode=0755
+      - /tmp:size=8m,noexec,nosuid
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m

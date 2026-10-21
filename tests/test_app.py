@@ -7,7 +7,8 @@ from app.main import create_app, Settings
 def setup_client(tmp_path, **kwargs):
     config = tmp_path/'network.csv'
     config.write_text('scope,school,vlan,cidr,label\nschool,GPHS,,10.44.0.0/20,GPHS campus\nvlan,GPHS,48,10.44.1.0/24,Staff\n')
-    settings = Settings(db_path=str(tmp_path/'test.db'),mapping_path=str(config),admin_username='admin',admin_password='test_password_1234567890',cooldown_seconds=30,**kwargs)
+    settings = Settings(db_path=str(tmp_path/'test.db'),mapping_path=str(config),admin_username='admin',admin_password='test_password_1234567890',cooldown_seconds=30,
+                        admin_client_cidrs='10.0.0.0/8,127.0.0.0/8',**kwargs)
     return TestClient(create_app(settings),base_url='https://testserver',client=('10.44.1.50',31337))
 
 

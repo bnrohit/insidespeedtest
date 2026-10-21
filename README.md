@@ -140,3 +140,71 @@ Once the app is deployed behind district HTTPS and the admin password has been c
 **Durability & security:** The running container writes admin-edited SMTP settings, mappings, and server credentials into `/data/managed/` (the existing persistent Docker volume). Files have mode 0600 and live only inside the private VM, not inside Git or build images. SMTP passwords in `/data/managed/smtp.json` are **not encrypted at rest**; protect the VM and volume and consider an external secret manager for high-assurance environments. The initial `private/networks.csv` and `private/agents.csv` files are imported **once** at first startup. Editing them later has no effect until imported through the GUI. Updates to GitHub do not change your deployed configuration. The server uses one worker to keep in-process mappings synchronized with the GUI.
 
 **GMCS-specific deployment:** Set the district's approved relay and routing in the admin GUI; the public repository deliberately ships with **no actual network inventory, SMTP relay address, senders, recipient addresses, or credentials**. Do not push the private deployment bundle or copy `.env`, `private/`, `/data/managed`, exported inventory, or agent credentials to GitHub. You must supply authoritative routing/DHCP/NetBox inventory to cover all district sites: example/pattern-based subnet guesses are not proof of live assignments. TLS settings and mail relay permissions must be verified on the VM. Admin access should be blocked from non-management networks at the reverse proxy/firewall and, ideally, protected by district SSO/MFA.
+
+
+### Admin IP verification and one-row editing (v3)
+
+The `/admin` dashboard includes an **Identify school/VLAN** lookup. Enter the real
+client IP reported by DHCP/NetBox to check the currently *active* mapping. An
+**Add school or VLAN subnet** form appends an appropriately escaped row to the
+editable CSV; nothing changes until **Validate & save inventory** is selected.
+School-wide prefixes are fallback identification only; they never establish
+VLAN. Use the CIDR of each VLAN's actual SVI/DHCP allocation, not a pattern
+based on the VLAN number. The app rejects conflicting overlapping VLAN IDs.
+
+**Extra admin restriction:** `ADMIN_CLIENT_CIDRS` defaults to loopback only; before serving district administrators, configure the verified private NOC administrator subnet(s) in your local `.env` and retain equivalent Nginx/firewall restrictions. This restriction applies even when someone knows the administrator password.
+
+**Public repository vs district configuration:** This repo contains application
+source and generic sample CSVs, not verified GMCS internal subnet inventory or
+SMTP sender/recipients. Import the provided private inventory file to the
+server *only after* comparing candidate entries with NetBox and real school
+routing. SMTP relay address alone cannot deliver mail without a permitted
+sender, recipients and relay connectivity. `git push` cannot execute the app
+or send mail; the live server is separate.
+
+## Nginx security patch / Bonjour (mDNS) hardening (2026-10-21)
+
+**Two different vulnerabilities:** Nginx HTTP reverse-proxy vulnerabilities are resolved by installing security-patched Nginx; Bonjour/mDNS discovery is a separate **host or network service**, commonly Avahi on Linux UDP/5353. The FastAPI speed-test service uses HTTPS/TCP and has no mDNS dependency. A source-code change cannot prove that a running VM or an upstream mDNS reflector is not responding. **Re-scan from a school or the Nessus scanning VLAN after deployment.**
+
+### Recommended: verified Nginx stable 1.30.6 HTTPS container
+
+The optional `compose.nginx.yaml` provides the official `nginx:1.30.6-alpine` image (newer than 1.28.2/1.29.5), a hardened TLS proxy, and a read-only container. Nginx 1.30.6 is the patched stable release as of October 21, 2026. Future vulnerabilities will still require updates. This does **not** replace, patch or restart the host's existing Nginx unless you deliberately switch over; **do not start two services on port 443**.
+
+```bash
+# On the Ubuntu speed-test VM after completing .env/private school configuration:
+cd /opt/gmcs-speedtest/insidespeedtest  # adjust to your deployed project directory
+sudo ss -ltnp '( sport = :443 )'        # must be empty before container proxy starts
+sudo mkdir -p private/tls
+# Install your GMCS-approved TLS certificate and key as:
+# private/tls/fullchain.pem and private/tls/privkey.pem (do not commit them).
+sudo chmod 700 private/tls
+sudo chmod 600 private/tls/privkey.pem
+
+docker compose -f compose.yaml -f compose.nginx.yaml config -q
+docker compose -f compose.yaml -f compose.nginx.yaml pull nginx
+docker compose -f compose.yaml -f compose.nginx.yaml up -d --build
+docker compose -f compose.yaml -f compose.nginx.yaml exec nginx nginx -v
+# Expected: nginx version: nginx/1.30.6
+curl --fail --cacert /path/to/gmcs-root-ca.pem \
+     https://your-internal-speedtest-domain/healthz
+```
+
+Nginx terminates **HTTPS 443**, forwards to application **127.0.0.1:8080** and overwrites untrusted source-IP headers. The certificate name must match the browser's DNS domain. Prefer a meaningful real server name instead of the `_` fallback in `deploy/nginx.container.conf`. Do not expose the VM publicly; use district ACLs and management-only administrator access. The container proxy is optional: if **host Nginx already handles TLS**, upgrade it via your OS's official Nginx stable repository and validate it with `sudo bash deploy/nginx-version-audit.sh`. On Ubuntu, follow [Nginx's official signed repository instructions](https://docs.nginx.com/nginx/admin-guide/installing-nginx/installing-nginx-open-source/#ubuntu-packages); confirm key fingerprints, back up existing configs, then `nginx -t` and perform a controlled reload. **Do not start the container proxy with an active host Nginx on 443.** Linux distribution-maintained packages may backport security fixes without displaying the upstream version; evaluate actual vendor advisories in that case.
+
+### Detect and disable unnecessary VM multicast discovery
+
+```bash
+# Read-only checks before touching production services:
+sudo bash deploy/mdns-audit.sh --check
+sudo ss -lunp | grep -E '(:5353|\]:5353)' || echo 'No local UDP/5353 listener'
+
+# Only after verifying that the VM does NOT need local printer/service discovery:
+sudo bash deploy/mdns-audit.sh --apply
+
+# Check for a patched host Nginx if you use host Nginx, not the Docker proxy:
+sudo bash deploy/nginx-version-audit.sh
+```
+
+The `--apply` command stops/masks the **Avahi daemon and socket** when present and blocks inbound UDP/5353 using UFW **only if UFW is already active**. It does **not** automatically enable a firewall, restart DNS, alter school switches or install/upgrade Nginx. If `systemd-resolved` or another responder still advertises mDNS, disable `MulticastDNS` in an approved maintenance window and verify again. At the host / routed network firewall, deny unwanted IPv4 and IPv6 UDP/5353 inbound to this VM, including any inter-VLAN mDNS reflector exceptions. Never disable Avahi on **every school server** blindly; this script is intended for the dedicated speed-test VM.
+
+Finally perform an **authorized external vantage-point scan** from a separate VLAN: check HTTPS/443, HTTP/8080 blocked externally, UDP/5353 absent, and any Nessus Bonjour findings. For UDP a generic port scanner can report `open|filtered` inconclusively; absence of a listening process and lack of mDNS responses from the scanner segment are stronger evidence. Nessus can report other vulnerabilities despite these controls, so review and patch findings continuously.

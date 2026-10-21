@@ -55,6 +55,8 @@ class SMTPForm(BaseModel):
             raise ValueError('TLS mode must be ssl, starttls, or none')
         if self.username and self.tls_mode == 'none':
             raise ValueError('SMTP authentication requires encrypted transport')
+        if self.password and self.tls_mode == 'none':
+            raise ValueError('Do not store or transmit SMTP passwords without encryption')
         if self.clear_password and self.password:
             raise ValueError('Cannot both clear and replace password')
         for addr in ([self.sender] if self.sender else []) + [x.strip() for x in self.recipients.split(',') if x.strip()]:
@@ -152,7 +154,9 @@ def save_smtp(path: Path, form: SMTPForm, defaults):
     with CONFIG_LOCK:
         previous = load_smtp(path, defaults)
         obj = form.model_dump(exclude={'clear_password'})
-        if form.clear_password:
+        if form.tls_mode == 'none' or form.clear_password:
+            # Switching from encrypted mail to an unauthenticated trusted relay
+            # must never retain a password that could later be sent over plaintext.
             obj['password'] = ''
         elif form.password is None or form.password == '':
             obj['password'] = previous.smtp_password

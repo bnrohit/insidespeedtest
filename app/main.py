@@ -51,6 +51,7 @@ class Settings:
     allowed_client_cidrs: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
     trusted_proxy_cidrs: str = ""
     admin_require_https: bool = True
+    admin_client_cidrs: str = "127.0.0.0/8,::1/128"
     agent_require_https: bool = True
     email_browser_results: bool = True
     email_agent_results: bool = True
@@ -81,6 +82,7 @@ class Settings:
             allowed_client_cidrs=os.getenv("ALLOWED_CLIENT_CIDRS", cls.allowed_client_cidrs),
             trusted_proxy_cidrs=os.getenv("TRUSTED_PROXY_CIDRS", ""),
             admin_require_https=env_bool("ADMIN_REQUIRE_HTTPS", True),
+            admin_client_cidrs=os.getenv("ADMIN_CLIENT_CIDRS", cls.admin_client_cidrs),
             agent_require_https=env_bool("AGENT_REQUIRE_HTTPS", True),
             email_browser_results=env_bool("EMAIL_BROWSER_RESULTS", True),
             email_agent_results=env_bool("EMAIL_AGENT_RESULTS", True),
@@ -181,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.agents = agents
     app.state.trusted_proxy_cidrs = parse_cidrs(settings.trusted_proxy_cidrs)
     app.state.allowed_client_cidrs = parse_cidrs(settings.allowed_client_cidrs)
+    app.state.admin_client_cidrs = parse_cidrs(settings.admin_client_cidrs)
     app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
 
     @app.middleware("http")
@@ -223,6 +226,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require_admin(request: Request, credentials: Annotated[HTTPBasicCredentials | None, Depends(security)]):
         ip = get_ip(request)
+        if not any(ipaddress.ip_address(ip) in network for network in app.state.admin_client_cidrs):
+            raise HTTPException(403, "Admin interface is restricted to approved management networks")
         if settings.admin_require_https and not secure_transport(request):
             raise HTTPException(403, "Admin access requires HTTPS")
         if admin_blocked(settings.db_path, ip):
@@ -397,6 +402,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, str(exc))
         app.state.mapping = new_mapping
         return {'status': 'saved', 'count': len(new_mapping.entries)}
+
+    @app.get("/api/admin/config/lookup", dependencies=[Depends(require_admin)])
+    def lookup_configured_ip(ip: str = Query(min_length=3, max_length=45)):
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            raise HTTPException(422, "Enter a valid IPv4 or IPv6 client address")
+        if addr.is_global or addr.is_multicast or addr.is_unspecified:
+            raise HTTPException(422, "Lookup only internal network addresses")
+        return {"client_ip": str(addr), **app.state.mapping.lookup(str(addr))}
 
     @app.get("/api/admin/config/networks.csv", dependencies=[Depends(require_admin)])
     def download_network_config():
