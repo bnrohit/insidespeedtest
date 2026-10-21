@@ -1,0 +1,33 @@
+services:
+  insidespeedtest:
+    build: .
+    container_name: gmcs-inside-speed-test
+    restart: unless-stopped
+    network_mode: host
+    # The service binds only to loopback: Nginx on the VM listens on HTTPS/443.
+    env_file: .env
+    environment:
+      DB_PATH: /data/results.sqlite3
+      MAPPING_PATH: /app/config/networks.csv
+      AGENTS_PATH: /app/config/agents.csv
+      BIND_HOST: 127.0.0.1
+    volumes:
+      - speedtest-data:/data
+      - ./private/networks.csv:/app/config/networks.csv:ro
+      - ./private/agents.csv:/app/config/agents.csv:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  speedtest-data:

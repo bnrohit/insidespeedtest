@@ -1,0 +1,28 @@
+[Unit]
+Description=GMCS internal school-to-NOC speed measurement
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=gmcs-speedtest
+Group=gmcs-speedtest
+EnvironmentFile=/etc/gmcs-speedtest/agent.env
+ExecStart=/usr/bin/python3 /opt/gmcs-speedtest/school_agent.py
+TimeoutStartSec=330
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+PrivateTmp=true
+PrivateDevices=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryDenyWriteExecute=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

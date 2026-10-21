@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin | GMCS Inside Speed Test</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell admin-shell"><header class="topbar"><div class="brand"><div class="mark">G</div><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><a href="/" class="quiet-link">← Back to speed test</a></header>
+<section class="hero"><div class="eyebrow">ADMINISTRATION / LIVE RESULTS</div><h1>Network <em>Overview</em></h1><p>Results from scheduled school Linux agents and manual browser tests. Email delivery status is recorded for each submitted test.</p></section>
+<section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
+<section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
+<div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>EMAIL</th></tr></thead><tbody id="rows"><tr><td colspan="10">Loading…</td></tr></tbody></table></div>
+<div class="caption" id="admin-status"></div></section>
+<section class="panel table-panel"><h2>School averages</h2><div class="table-scroll"><table><thead><tr><th>SCHOOL</th><th>TESTS</th><th>AVG DOWNLOAD</th><th>AVG UPLOAD</th></tr></thead><tbody id="schools"></tbody></table></div></section>
+<footer>Measurements are client reported, subject to client, VM, browser, and path limitations. Unknown VLAN means no exact mapping exists.</footer>
+</main><script src="/static/admin.js" defer></script></body></html>

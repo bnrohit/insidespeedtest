@@ -1,0 +1,140 @@
+'use strict';
+const el = (id) => document.getElementById(id);
+const start = el('start');
+let running = false;
+let latestMbps = 0;
+const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
+const fmt = n => Number(n).toFixed(1);
+const nonce = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2,'0')).join('');
+
+async function jsonApi(url, options = {}) {
+  const response = await fetch(url, {cache:'no-store', ...options});
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || `Server error ${response.status}`);
+  }
+  return response.json();
+}
+function setIdentity(identity) {
+  el('school').textContent = identity.school || 'Unknown';
+  el('vlan').textContent = identity.vlan || 'Unknown';
+  el('ip').textContent = identity.client_ip || 'Unknown';
+}
+async function init(){
+  try {setIdentity(await jsonApi('/api/identity'));}
+  catch(err) {el('school').textContent='Unavailable';el('result-message').textContent=err.message;start.disabled=true;}
+}
+function updateProgress(pct,text,phase) {
+  el('progress').style.width = `${Math.min(100,Math.max(0,pct))}%`;
+  el('status').textContent=text;
+  el('phase').textContent=phase;
+}
+async function pingTest(token) {
+  const readings=[];
+  let failed=0;
+  for(let i=0;i<10;i++) {
+    const t=performance.now();
+    try {
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),2000);
+      try {const response=await fetch(`/api/ping?n=${nonce()}`,{cache:'no-store',signal:controller.signal,headers:{'X-Speedtest-Token':token}});if(!response.ok)throw Error('Ping failed');}
+      finally {clearTimeout(timeout);}
+      readings.push(performance.now()-t);
+    } catch {failed++;}
+    updateProgress(3+i*1.5,`Measuring latency (${i+1}/10)`,'PING');
+    await sleep(50);
+  }
+  if(!readings.length)throw new Error('Latency test failed. Check school-to-server access.');
+  const avg=readings.reduce((a,b)=>a+b,0)/readings.length;
+  const jitter=readings.length>1?readings.slice(1).reduce((acc,val,i)=>acc+Math.abs(val-readings[i]),0)/(readings.length-1):0;
+  el('latency').textContent=fmt(avg);
+  el('jitter').textContent=fmt(jitter);
+  return {latency_ms:avg,jitter_ms:jitter,packet_loss_pct:failed*10};
+}
+async function throughput(mode,seconds,streams,onValue,token) {
+  const deadline=performance.now()+seconds*1000;
+  const began=performance.now();
+  let bytes=0;
+  let failureCount=0;
+  let allowanceExhausted=false;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),seconds*1000);
+  let payload=null;
+  if(mode==='upload') {
+    payload=new Uint8Array(4*1024*1024);
+    for(let i=0;i<payload.length;i+=65536){crypto.getRandomValues(payload.subarray(i,Math.min(i+65536,payload.length)));}
+  }
+  const sample=setInterval(()=>{
+    const elapsed=Math.max((performance.now()-began)/1000,.001);
+    latestMbps=bytes*8/elapsed/1e6;
+    onValue(latestMbps,Math.min(1,(performance.now()-began)/(seconds*1000)));
+  },200);
+  async function worker() {
+    while(performance.now()<deadline&&!controller.signal.aborted&&!allowanceExhausted){
+      try {
+        if(mode==='download') {
+          const response=await fetch(`/api/download?bytes=33554432&n=${nonce()}`,{signal:controller.signal,cache:'no-store',headers:{'X-Speedtest-Token':token}});
+          if(response.status===429){allowanceExhausted=true;break;}
+          if(!response.ok||!response.body)throw Error('Download failed');
+          const reader=response.body.getReader();
+          for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(performance.now()>=deadline)break;}
+          await reader.cancel().catch(()=>{});
+        } else {
+          const response=await fetch(`/api/upload?n=${nonce()}`,{method:'POST',body:payload,signal:controller.signal,cache:'no-store',headers:{'Content-Type':'application/octet-stream','X-Speedtest-Token':token}});
+          if(response.status===429){allowanceExhausted=true;break;}
+          if(!response.ok)throw Error('Upload failed');
+          const result=await response.json();
+          bytes+=result.bytes_received;
+        }
+        failureCount=0;
+      }catch(err){if(controller.signal.aborted)break;if(++failureCount>=3)throw err;await sleep(150);}
+    }
+  }
+  try {await Promise.all(Array.from({length:streams},()=>worker()));}
+  finally {clearTimeout(timeout);clearInterval(sample);controller.abort();}
+  const secondsElapsed=(performance.now()-began)/1000;
+  const mbps=bytes*8/Math.max(secondsElapsed,.001)/1e6;
+  onValue(mbps,1);
+  return {mbps,bytes};
+}
+start.addEventListener('click',async()=>{
+  if(running)return;
+  running=true;start.disabled=true;
+  el('result-message').textContent='';el('download').textContent='—';el('upload').textContent='—';
+  el('latency').textContent='—';el('jitter').textContent='—';el('live-value').textContent='0.0';
+  try {
+    updateProgress(1,'Opening authenticated test session…','STARTING');
+    let session;
+    // If many classrooms run tests at once, wait for a transfer slot instead
+    // of flooding the school-to-NOC WAN link. This is not a login restriction.
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const response=await fetch('/api/session',{method:'POST',cache:'no-store'});
+      if(response.ok){session=await response.json();break;}
+      const detail=await response.json().catch(()=>({}));
+      if(response.status!==429 || !(detail.detail||'').includes('server is busy')) {
+        throw new Error(detail.detail||`Server error ${response.status}`);
+      }
+      updateProgress(1,`Server busy. Waiting for capacity (${attempt+1}/15)…`,'QUEUED');
+      await sleep(10000);
+    }
+    if(!session)throw new Error('The test server is busy. Try again shortly.');
+    setIdentity(session.identity);
+    const ping=await pingTest(session.token);
+    updateProgress(20,'Testing download to GMCS server…','DOWNLOAD');
+    const down=await throughput('download',8,4,(mbps,pct)=>{
+      el('live-value').textContent=fmt(mbps);el('download').textContent=fmt(mbps);
+      updateProgress(20+pct*37,'Testing download to GMCS server…','DOWNLOAD');
+    },session.token);
+    updateProgress(58,'Testing upload to GMCS server…','UPLOAD');
+    const up=await throughput('upload',8,2,(mbps,pct)=>{
+      el('live-value').textContent=fmt(mbps);el('upload').textContent=fmt(mbps);
+      updateProgress(58+pct*40,'Testing upload to GMCS server…','UPLOAD');
+    },session.token);
+    const answer=await jsonApi('/api/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:session.token,download_mbps:down.mbps,upload_mbps:up.mbps,download_bytes:down.bytes,upload_bytes:up.bytes,...ping})});
+    updateProgress(100,'Completed • Result #' + answer.result_id,'COMPLETE');
+    el('result-message').textContent=`Recorded for ${answer.school}, VLAN ${answer.vlan}. Email: ${answer.email_notification === 'suppressed' ? 'already notified for this school/VLAN in the last 24 hours' : answer.email_notification}.`;
+  }catch(err){
+    updateProgress(0,'Test did not complete','ERROR');el('result-message').textContent=err.message;
+  }finally{running=false;start.disabled=false;}
+});
+init();

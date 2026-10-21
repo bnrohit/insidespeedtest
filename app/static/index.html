@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GMCS Inside Speed Test</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell">
+  <header class="topbar"><div class="brand"><div class="mark">G</div><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><a href="/admin" class="quiet-link">Admin dashboard ↗</a></header>
+  <section class="hero"><div class="eyebrow">INTERNAL NETWORK DIAGNOSTICS</div><h1>Inside <em>Speed Test</em></h1><p>Measure your school's connection to the GMCS-hosted test server. Results can help network administrators investigate performance across sites.</p></section>
+  <section class="panel identity"><div><small>DETECTED SCHOOL</small><strong id="school">Detecting…</strong></div><div><small>VLAN</small><strong id="vlan">—</strong></div><div><small>CLIENT IP</small><strong id="ip">—</strong></div></section>
+  <section class="panel test-card"><div class="test-top"><span id="status" aria-live="polite">Ready to measure your connection</span><span class="pill">GMCS LAN TEST</span></div>
+  <div class="dial"><div class="dial-inner"><div id="live-value" class="live-value">0.0</div><div class="unit">Mbps</div><div id="phase">READY</div></div></div>
+  <div class="progress-track"><div id="progress" class="progress-bar"></div></div>
+  <button id="start" class="start-btn">START SPEED TEST <span>→</span></button>
+  <div class="metrics"><div class="metric"><div class="metric-icon">↓</div><small>DOWNLOAD</small><strong id="download">—</strong><span>Mbps</span></div><div class="metric"><div class="metric-icon">↑</div><small>UPLOAD</small><strong id="upload">—</strong><span>Mbps</span></div><div class="metric"><div class="metric-icon">↔</div><small>LATENCY</small><strong id="latency">—</strong><span>ms</span></div><div class="metric"><div class="metric-icon">⌁</div><small>JITTER</small><strong id="jitter">—</strong><span>ms</span></div></div>
+  <p class="result-message" id="result-message" role="status"></p></section>
+  <footer><div>Only for authorized GMCS network users. School/VLAN labels depend on maintained IP mappings.</div><div>Tests measure throughput <strong>to this internal VM</strong>, not ISP Internet speed.</div></footer>
+</main><script src="/static/test.js" defer></script></body></html>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run a GMCS school network speed test every morning (staggered)
+
+[Timer]
+OnCalendar=*-*-* 06:15:00
+RandomizedDelaySec=90min
+FixedRandomDelay=true
+Persistent=true
+AccuracySec=1min
+Unit=gmcs-speedtest.service
+
+[Install]
+WantedBy=timers.target

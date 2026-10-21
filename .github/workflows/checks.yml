@@ -1,0 +1,25 @@
+name: Security and tests
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '37 10 * * 1'
+permissions:
+  contents: read
+jobs:
+  test-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_PASSWORD: TEST_ONLY_A_LONG_RANDOM_ADMIN_PASSWORD
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-dev.txt pip-audit bandit
+      - run: python -m pytest -q
+      - run: python -m compileall -q app agent
+      - run: python -m pip_audit -r requirements.txt
+      - run: python -m bandit -r app agent -ll -q
