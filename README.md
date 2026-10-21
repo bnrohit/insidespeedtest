@@ -13,7 +13,7 @@ Secure-by-design, self-hosted **school-to-NOC network speed test** with a browse
 
 ## VM setup (Ubuntu guest on XCP-ng)
 
-Deploy on a **dedicated Ubuntu VM**, not on XCP-ng dom0. Suggested starting point: 2-4 vCPU, 4 GiB RAM, 30 GiB disk and a NIC/uplink sized for the anticipated aggregate school test traffic. Install Docker Engine and Docker Compose plugin, a reverse proxy (example Nginx in `deploy/nginx.conf.example`) and a valid internal-CA or publicly trusted TLS certificate for your internal DNS name. Permit school routing/ACLs to **TCP 443**, limit SSH/admin to the management network. Do **not** expose the test service to the public Internet.
+Deploy on a **dedicated Ubuntu VM**, not on XCP-ng dom0. Suggested starting point: 2-4 vCPU, 4 GiB RAM, 30 GiB disk and a NIC/uplink sized for the anticipated aggregate school test traffic. Install Docker Engine and Docker Compose plugin, a reverse proxy (example Nginx in `deploy/nginx.conf.example`) and a valid internal-CA or publicly trusted TLS certificate for your internal DNS name. **Use NGINX stable 1.30.6+ (or mainline 1.31.7+)**; older releases are below the current security baseline. Permit school routing/ACLs to **TCP 443**, limit SSH/admin to the management network. Do **not** expose the test service to the public Internet.
 
 ```bash
 git clone https://github.com/bnrohit/insidespeedtest.git
@@ -32,7 +32,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:8080/healthz
 ```
 
-The app binds **127.0.0.1:8080** by default. Configure Nginx to forward HTTPS 443 to loopback 8080. The Nginx sample overwrites source-IP headers and is an *example*, not an automatically installed, production-ready certificate/firewall policy. The Docker container uses an unprivileged UID, read-only root filesystem, Linux host networking to preserve the observed source IP, and a persistent SQLite volume. `private/`, `.env` and `data/` are gitignored. The container requires `private/networks.csv` and `private/agents.csv` files.
+The app binds **127.0.0.1:8080** by default. The deployment host should not run Avahi/Bonjour/ZeroConf and should have no UDP/5353 listener unless an explicitly approved separate service requires it. Configure Nginx to forward HTTPS 443 to loopback 8080. The Nginx sample overwrites source-IP headers and is an *example*, not an automatically installed, production-ready certificate/firewall policy. The Docker container uses an unprivileged UID, read-only root filesystem, Linux host networking to preserve the observed source IP, and a persistent SQLite volume. `private/`, `.env` and `data/` are gitignored. The container requires `private/networks.csv` and `private/agents.csv` files.
 
 ### Configure accurate school / VLAN lookup
 
