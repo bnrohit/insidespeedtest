@@ -1,4 +1,4 @@
 # Pinned runtime dependencies; security updates validated by GitHub Actions.
 fastapi==0.158.1
 starlette==1.9.0
-uvicorn==0.48.0
+uvicorn==0.54.0
