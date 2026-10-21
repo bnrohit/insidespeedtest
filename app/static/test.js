@@ -107,15 +107,15 @@ start.addEventListener('click',async()=>{
     let session;
     // If many classrooms run tests at once, wait for a transfer slot instead
     // of flooding the school-to-NOC WAN link. This is not a login restriction.
-    for (let attempt = 0; attempt < 15; attempt++) {
+    for (let attempt = 0; attempt < 60; attempt++) {
       const response=await fetch('/api/session',{method:'POST',cache:'no-store'});
       if(response.ok){session=await response.json();break;}
       const detail=await response.json().catch(()=>({}));
       if(response.status!==429 || !(detail.detail||'').includes('server is busy')) {
         throw new Error(detail.detail||`Server error ${response.status}`);
       }
-      updateProgress(1,`Server busy. Waiting for capacity (${attempt+1}/15)…`,'QUEUED');
-      await sleep(10000);
+      updateProgress(1,`Server busy. Waiting for capacity (${attempt+1}/60)…`,'QUEUED');
+      await sleep(10000 + Math.random()*2000);
     }
     if(!session)throw new Error('The test server is busy. Try again shortly.');
     setIdentity(session.identity);
