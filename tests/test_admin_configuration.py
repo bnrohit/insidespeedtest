@@ -90,3 +90,16 @@ def test_reject_public_ranges_and_conflicting_vlan_inventories():
         validate_mapping_csv('scope,school,vlan,cidr,label\nvlan,S,48,8.8.8.0/24,Public\n')
     with pytest.raises(ValueError):
         validate_mapping_csv('scope,school,vlan,cidr,label\nvlan,S,48,10.10.0.0/16,Staff\nvlan,T,56,10.10.56.0/24,Students\n')
+
+
+def test_admin_csrf_origin_checks(client):
+    c,_=client
+    auth=('admin','TESTPASSWORD_LONG_123456')
+    payload={'host':'mail.example.test','port':25,'tls_mode':'none',
+             'sender':'sender@example.org','recipients':'admins@example.org'}
+    assert c.put('/api/admin/config/smtp',auth=auth,json=payload,
+        headers={'Origin':'https://attacker.example','Sec-Fetch-Site':'cross-site'}).status_code==403
+    assert c.put('/api/admin/config/smtp',auth=auth,json=payload,
+        headers={'Origin':'https://testserver','Sec-Fetch-Site':'same-origin'}).status_code==200
+    assert c.post('/api/admin/config/smtp/test',auth=auth,
+        headers={'Origin':'https://attacker.example','Sec-Fetch-Site':'cross-site'}).status_code==403

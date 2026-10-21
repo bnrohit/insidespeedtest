@@ -187,6 +187,14 @@ def validate_mapping_csv(text: str) -> IdentityMatcher:
         rows.append((scope, school, vlan, subnet, label))
     if len(rows) > 2000:
         raise ValueError('Too many mapping rows')
+    # A duplicated exact school subnet with conflicting labels is ambiguous.
+    schools = {}
+    for row in rows:
+        if row[0] == 'school':
+            prev = schools.get(str(row[3]))
+            if prev is not None and prev != row[1]:
+                raise ValueError(f'Conflicting school identities for {row[3]}')
+            schools[str(row[3])] = row[1]
     # VLAN CIDRs cannot overlap with a different identity; such a record is ambiguous.
     vlan_rows = [r for r in rows if r[0] == 'vlan']
     for i, a in enumerate(vlan_rows):

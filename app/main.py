@@ -192,6 +192,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except HTTPException as exc:
                 from fastapi.responses import JSONResponse
                 return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        # State-changing admin calls must originate from this exact origin.
+        # Authenticated browser Basic credentials must not be sufficient for CSRF.
+        if request.url.path.startswith('/api/admin/') and request.method in {'POST','PUT','PATCH','DELETE'}:
+            site = request.headers.get('sec-fetch-site', '').lower()
+            origin = request.headers.get('origin', '')
+            if site not in {'', 'none', 'same-origin'}:
+                return Response(status_code=403, content='Cross-site admin changes are not allowed')
+            if origin:
+                from urllib.parse import urlsplit
+                try:
+                    parsed = urlsplit(origin)
+                    host = request.headers.get('host', '')
+                    if (parsed.scheme not in {'https','http'} or
+                        parsed.netloc.lower() != host.lower() or
+                        (parsed.scheme != 'https' and secure_transport(request))):
+                        return Response(status_code=403, content='Admin origin mismatch')
+                except ValueError:
+                    return Response(status_code=403, content='Invalid admin origin')
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
