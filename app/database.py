@@ -149,13 +149,20 @@ def reserve_transfer(db_path: str, token_hash: str, ip: str, amount: int,
     """Reserve transfer allowance before sending/receiving; atomic across requests."""
     if direction not in ("download", "upload") or amount <= 0:
         return False
-    column = "download_reserved" if direction == "download" else "upload_reserved"
+    # SQL column identifiers must never be interpolated into query text.
+    # Keep both statements constant and bind all runtime values as parameters.
+    if direction == "download":
+        statement = """UPDATE sessions SET download_reserved=download_reserved+?
+          WHERE token_hash=? AND client_ip=? AND used_at IS NULL AND created_at>=?
+          AND download_reserved+upload_reserved+?<=? AND download_reserved+?<=?"""
+    else:
+        statement = """UPDATE sessions SET upload_reserved=upload_reserved+?
+          WHERE token_hash=? AND client_ip=? AND used_at IS NULL AND created_at>=?
+          AND download_reserved+upload_reserved+?<=? AND upload_reserved+?<=?"""
     now = int(time.time())
     with connect(db_path) as con:
         con.execute("BEGIN IMMEDIATE")
-        cur = con.execute(f"""UPDATE sessions SET {column}={column}+?
-          WHERE token_hash=? AND client_ip=? AND used_at IS NULL AND created_at>=?
-          AND download_reserved+upload_reserved+?<=? AND {column}+?<=?""",
+        cur = con.execute(statement,
                           (amount, token_hash, ip, now - ttl_seconds, amount, max_total_bytes, amount, max_direction_bytes))
         return cur.rowcount == 1
 
