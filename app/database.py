@@ -74,10 +74,15 @@ def init_db(db_path: str) -> None:
 
 
 def notification_group(identity: dict, ip: str) -> str:
-    """Separate schools with equal VLAN IDs; keep unknown schools independent by IP."""
+    """A single email bucket per school and VLAN, including unknown identities.
+
+    Unknown clients must NOT each open their own mail bucket: a large number of
+    unmapped school visitors could otherwise flood the district SMTP relay.
+    Source IP is still retained on every individual test record.
+    """
     school = identity.get("school", "Unknown")
     vlan = identity.get("vlan", "Unknown")
-    return json.dumps([school, vlan, ip if school == "Unknown" else ""], separators=(",", ":"))
+    return json.dumps([school, vlan], separators=(",", ":"))
 
 
 def create_session(db_path: str, token_hash: str, ip: str, cooldown_seconds: int,

@@ -21,6 +21,7 @@ def send_result(settings, result_id: int, record: dict) -> None:
     clean_school = str(record['school']).replace('\r', ' ').replace('\n', ' ')[:80]
     clean_agent = str(record.get('agent_id') or 'Manual browser').replace('\r', ' ').replace('\n', ' ')[:64]
     message['Subject'] = (f"[GMCS Inside Speed Test] {clean_school} | "
+                          f"VLAN {record['vlan']} | "
                           f"{'Scheduled ' + clean_agent if record.get('agent_id') else 'Manual'} | "
                           f"{record['download_mbps']:.1f} Mbps down")
     message['From'] = settings.smtp_from

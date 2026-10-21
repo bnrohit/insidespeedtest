@@ -3,7 +3,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
- && useradd -r -u 10001 speedtest \
+ && groupadd -g 10001 speedtest \
+ && useradd -r -u 10001 -g 10001 speedtest \
  && mkdir -p /data \
  && chown -R speedtest:speedtest /data
 COPY app ./app

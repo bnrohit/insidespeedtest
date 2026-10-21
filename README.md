@@ -22,7 +22,9 @@ mkdir -p private
 cp .env.example .env
 cp config/networks.csv private/networks.csv
 cp config/agents.csv private/agents.csv
-chmod 600 .env private/*.csv
+chmod 600 .env
+# Private CSVs must be readable by the unprivileged UID/GID 10001 in Docker.
+sudo chown root:10001 private/*.csv && sudo chmod 640 private/*.csv
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))' # paste as ADMIN_PASSWORD in .env
 nano .env
 nano private/networks.csv
@@ -114,7 +116,7 @@ Use `/admin` over HTTPS, preferably restrict to network admin management IPs at 
 - An authenticated school agent uses a per-server token, verified over TLS, and bound to its observed network IP range. Browsers need no key and cannot impersonate an agent without a valid token.
 - Tests measure **between browser/cache and the VM**, not external Internet speed, and clients can falsify their own speed figures. This is an operational diagnostic tool, not a cryptographic measurement.
 - A one-shot SMTP background task may be interrupted if the application process is stopped at just the wrong moment; review `queued`/`failed` statuses and SMTP logs. Delivery is not guaranteed until verified at the admin mailbox.
-- Email suppression is *per school+VLAN*, across both agent and browser runs, not per student/device and not district-wide. Unknown school groups use observed source IP to avoid combining unrelated unmapped sites. Check mappings before relying on VLAN attribution.
+- Email suppression is *per school+VLAN*, across both agent and browser runs, not per student/device and not district-wide. Unknown/unmapped visitors are combined into one global 24-hour email bucket to avoid an SMTP alert flood. Their individual records still keep observed source IP, but school/VLAN remain **Unknown** until NetBox/DHCP mapping is configured. Check mappings before relying on VLAN attribution.
 
 Test locally (no real SMTP or district networks needed):
 

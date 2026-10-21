@@ -30,15 +30,15 @@ def test_hundred_simultaneous_tests_create_one_notice_per_school_vlan(tmp_path):
         assert con.execute("SELECT COUNT(*) FROM notification_gates").fetchone()[0]==2
 
 
-def test_grouping_unknown_ip_and_mail_fail_retry(tmp_path):
+def test_unknown_sources_share_one_daily_alert_and_mail_fail_retry(tmp_path):
     db=str(tmp_path/'db.sqlite')
     init_db(db)
     a=notification_group({'school':'Unknown','vlan':'Unknown'}, '10.1.2.3')
     b=notification_group({'school':'Unknown','vlan':'Unknown'}, '10.1.2.4')
-    assert a != b
+    assert a == b  # Never send one mail per unmapped IP when 100 clients visit
     assert claim_notification(db,a,1,86400)
     assert not claim_notification(db,a,2,86400)
-    assert claim_notification(db,b,3,86400)
+    assert not claim_notification(db,b,3,86400)
     failed_notification(db,1,900)
     assert not claim_notification(db,a,4,86400)
     with connect(db) as con:
@@ -60,3 +60,16 @@ def test_session_global_and_per_vlan_capacity(tmp_path):
                           group_key='["EXAMPLE-HS","56",""]',max_active=5,max_group_active=4)=='created'
     assert create_session(db,'token7','10.1.5.70',30,6,
                           group_key='["OTHER-HS","48",""]',max_active=5,max_group_active=4)=='busy'
+
+
+def test_unknown_hundred_clients_create_only_one_smtp_claim(tmp_path):
+    db=str(tmp_path/'unknown.db')
+    init_db(db)
+    groups = [notification_group({'school': 'Unknown', 'vlan': 'Unknown'}, f'10.99.2.{i}')
+              for i in range(1, 101)]
+    assert len(set(groups)) == 1
+    def attempt(i):
+        return claim_notification(db, groups[i-1], i, 86400)
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        claimed = list(pool.map(attempt, range(1, 101)))
+    assert sum(claimed) == 1

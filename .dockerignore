@@ -4,3 +4,11 @@
 __pycache__
 .pytest_cache
 .venv
+
+# Private deployment inventory/agent keys must never enter image build context
+private/
+data/
+GMCS-PRIVATE-DEPLOY.md
+deploy/gmcs-private-setup.sh
+deploy/gmcs-nginx-gated.conf
+*.zip
