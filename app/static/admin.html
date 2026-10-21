@@ -7,5 +7,39 @@
 <div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>EMAIL</th></tr></thead><tbody id="rows"><tr><td colspan="10">Loading…</td></tr></tbody></table></div>
 <div class="caption" id="admin-status"></div></section>
 <section class="panel table-panel"><h2>School averages</h2><div class="table-scroll"><table><thead><tr><th>SCHOOL</th><th>TESTS</th><th>AVG DOWNLOAD</th><th>AVG UPLOAD</th></tr></thead><tbody id="schools"></tbody></table></div></section>
+<section class="panel table-panel config-area" id="config-area">
+  <div class="section-head"><div><h2>Configuration center</h2><p>Changes are stored on this Linux VM, never pushed to GitHub. Saving updates the live service.</p></div></div>
+  <h3>SMTP &amp; admin notification rules</h3>
+  <div class="form-grid">
+    <label>SMTP relay host<input id="smtp-host" maxlength="253" autocomplete="off" placeholder="relay.internal.example"></label>
+    <label>Port<input id="smtp-port" type="number" min="1" max="65535" value="25"></label>
+    <label>Encryption<select id="smtp-tls"><option value="starttls">STARTTLS (recommended)</option><option value="ssl">Implicit TLS</option><option value="none">None (trusted private relay only)</option></select></label>
+    <label>SMTP username<input id="smtp-user" autocomplete="off" placeholder="Optional"></label>
+    <label>SMTP password<input id="smtp-pass" type="password" autocomplete="new-password" placeholder="Leave blank to keep existing"></label>
+    <label>Sender address<input id="smtp-from" type="email" placeholder="speedtest@example.org"></label>
+    <label class="full-width">Admin email recipients (comma separated)<input id="smtp-to" placeholder="network-team@example.org"></label>
+    <label>Notification cooldown (hours)<input id="smtp-hours" type="number" min="1" max="168" step="1" value="24"></label>
+    <label class="checkbox-label"><input id="smtp-browser" type="checkbox" checked> Email first browser result per school/VLAN</label>
+    <label class="checkbox-label"><input id="smtp-agent" type="checkbox" checked> Email first scheduled agent result per school/VLAN</label>
+    <label class="checkbox-label"><input id="smtp-clear-pass" type="checkbox"> Delete saved SMTP password</label>
+  </div>
+  <p class="caption">Credentials are stored in the private VM data volume, not in the repository. For port 25 with no TLS, do not enter SMTP credentials. A saved setting does not send an email automatically.</p>
+  <div class="actions"><button id="save-smtp" class="secondary-btn" type="button">Save SMTP settings</button><button id="test-smtp" class="secondary-btn" type="button">Send one test email</button></div>
+  <div id="smtp-status" class="caption" role="status"></div>
+  <hr>
+  <h3>School and VLAN source-IP inventory</h3>
+  <p>Each row identifies a school/site or a specific VLAN subnet. Only upload verified routes/DHCP subnets. VLAN detection is inferred from the source IP, not read from the browser.</p>
+  <textarea id="network-csv" rows="11" spellcheck="false" aria-label="Private school VLAN CSV inventory"></textarea>
+  <div class="actions"><button id="save-networks" class="secondary-btn" type="button">Validate &amp; save inventory</button><a href="/api/admin/config/networks.csv" class="secondary-btn">Export private CSV</a></div>
+  <div id="network-status" class="caption" role="status"></div>
+  <hr>
+  <h3>Scheduled Linux school servers</h3>
+  <p>Regular school visitors need no key. Add a cache server only to run an automated morning test. Each server receives a distinct one-time key bound to its actual source IP.</p>
+  <div class="form-grid"><label>Server ID<input id="agent-id" placeholder="SCHOOL-CACHE01" maxlength="64"></label><label>Observed source IP (/32 or /128)<input id="agent-cidr" placeholder="10.x.x.x/32"></label></div>
+  <div class="actions"><button id="add-agent" class="secondary-btn" type="button">Generate server token</button></div>
+  <div id="agent-secret-box" class="agent-secret-box" hidden><strong>Copy now — this token is shown only once.</strong><textarea id="agent-secret" rows="3" readonly></textarea><button id="copy-agent" class="secondary-btn" type="button">Copy token</button></div>
+  <div id="agents-status" class="caption" role="status"></div>
+  <div class="table-scroll"><table><thead><tr><th>SERVER</th><th>AUTHORIZED IP</th><th>ACTION</th></tr></thead><tbody id="agents-list"></tbody></table></div>
+</section>
 <footer>Measurements are client reported, subject to client, VM, browser, and path limitations. Unknown VLAN means no exact mapping exists.</footer>
 </main><script src="/static/admin.js" defer></script></body></html>

@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS notification_gates (
  result_id INTEGER NOT NULL,
  next_eligible_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS admin_smtp_probe (
+ id INTEGER PRIMARY KEY CHECK (id=1), last_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS admin_failures (
  client_ip TEXT NOT NULL, attempted_at INTEGER NOT NULL
 );
@@ -219,3 +222,14 @@ def admin_failure(db_path: str, ip: str):
 def admin_success(db_path: str, ip: str):
     with connect(db_path) as con:
         con.execute("DELETE FROM admin_failures WHERE client_ip=?", (ip,))
+
+
+def allow_smtp_probe(db_path: str, cooldown: int = 300) -> bool:
+    """Persisted cross-request rate limit so SMTP diagnostics cannot flood inboxes."""
+    now = int(time.time())
+    with connect(db_path) as con:
+        con.execute("BEGIN IMMEDIATE")
+        result = con.execute("""INSERT INTO admin_smtp_probe(id,last_at) VALUES(1,?)
+            ON CONFLICT(id) DO UPDATE SET last_at=excluded.last_at
+            WHERE admin_smtp_probe.last_at<=?""", (now, now-cooldown))
+        return result.rowcount == 1

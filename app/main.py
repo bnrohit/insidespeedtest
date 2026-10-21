@@ -24,6 +24,9 @@ from .database import (admin_blocked, admin_failure, admin_success, connect, cre
                        notification_group, claim_notification)
 from .emailer import send_result
 from .identity import IdentityMatcher
+from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
+                         smtp_public_config, save_smtp, put_mappings, list_agents,
+                         put_agent, remove_agent, validate_mapping_csv)
 
 log = logging.getLogger(__name__)
 APP_ROOT = Path(__file__).resolve().parent
@@ -167,11 +170,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and 300 <= settings.email_dedupe_seconds <= 604800
             and 1 <= settings.max_active_per_vlan <= settings.max_active_tests <= 100):
         raise RuntimeError("Invalid session limits")
-    mapping = IdentityMatcher.from_csv(settings.mapping_path)
-    agents = Agents(settings.agents_path)
     init_db(settings.db_path)
+    managed = setup_managed(settings.db_path, settings.mapping_path, settings.agents_path)
+    mapping = IdentityMatcher.from_csv(managed['mappings'])
+    agents = Agents(str(managed['agents']))
     app = FastAPI(title="GMCS Inside Speed Test", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
+    app.state.managed = managed
     app.state.mapping = mapping
     app.state.agents = agents
     app.state.trusted_proxy_cidrs = parse_cidrs(settings.trusted_proxy_cidrs)
@@ -238,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/identity")
     def identity(request: Request):
         ip = get_ip(request)
-        return {"client_ip": ip, **mapping.lookup(ip)}
+        return {"client_ip": ip, **app.state.mapping.lookup(ip)}
 
     @app.get("/api/ping")
     def ping(request: Request):
@@ -292,11 +297,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if agent_id or agent_key:
             if (not AGENT_ID_RE.fullmatch(agent_id) or
                 (settings.agent_require_https and not secure_transport(request)) or
-                    not agents.authenticate(agent_id, agent_key, ip)):
+                    not app.state.agents.authenticate(agent_id, agent_key, ip)):
                 raise HTTPException(401, "Invalid automated agent credentials or transport")
         token = secrets.token_urlsafe(32)
         hashed = hashlib.sha256(token.encode()).hexdigest()
-        source_group = notification_group(mapping.lookup(ip), ip)
+        source_group = notification_group(app.state.mapping.lookup(ip), ip)
         outcome = create_session(settings.db_path, hashed, ip, settings.cooldown_seconds,
                                  settings.max_sessions_per_hour, agent_id=agent_id,
                                  group_key=source_group, max_active=settings.max_active_tests,
@@ -307,26 +312,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                     headers={"Retry-After": "10"})
             raise HTTPException(429, "Test cooldown reached. Try again later.",
                                 headers={"Retry-After": str(settings.cooldown_seconds)})
-        return {"token": token, "identity": {"client_ip": ip, **mapping.lookup(ip)},
+        return {"token": token, "identity": {"client_ip": ip, **app.state.mapping.lookup(ip)},
                 "agent_id": agent_id}
 
     @app.post("/api/results")
     def result(request: Request, data: Report, bg: BackgroundTasks):
         ip = get_ip(request)
-        record = {**data.model_dump(exclude={"token"}), "client_ip": ip, **mapping.lookup(ip)}
+        record = {**data.model_dump(exclude={"token"}), "client_ip": ip, **app.state.mapping.lookup(ip)}
         hashed = hashlib.sha256(data.token.encode()).hexdigest()
         saved = save_result(settings.db_path, hashed, ip, record)
         if saved is None:
             raise HTTPException(400, "Invalid, expired, already used, or inconsistent test session")
         result_id, agent_id = saved
         record["agent_id"] = agent_id
-        should_email = settings.email_agent_results if agent_id else settings.email_browser_results
-        smtp_ready = bool(settings.smtp_host and settings.smtp_to and settings.smtp_from)
+        mail_settings = load_smtp(managed['smtp'], settings)
+        should_email = mail_settings.email_agent_results if agent_id else mail_settings.email_browser_results
+        smtp_ready = bool(mail_settings.smtp_host and mail_settings.smtp_to and mail_settings.smtp_from)
         email_status = "disabled"
         if should_email and smtp_ready:
             group = notification_group(record, ip)
-            if claim_notification(settings.db_path, group, result_id, settings.email_dedupe_seconds):
-                bg.add_task(send_result, settings, result_id, record)
+            if claim_notification(settings.db_path, group, result_id, mail_settings.email_dedupe_seconds):
+                bg.add_task(send_result, mail_settings, result_id, record)
                 email_status = "queued"
             else:
                 email_status = "suppressed"
@@ -334,6 +340,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             set_email_status(settings.db_path, result_id, "disabled")
         return {"result_id": result_id, "school": record["school"], "vlan": record["vlan"],
                 "agent_id": agent_id, "email_notification": email_status}
+
+    @app.get("/api/admin/config/smtp", dependencies=[Depends(require_admin)])
+    def get_smtp_config():
+        return smtp_public_config(managed['smtp'], settings)
+
+    @app.put("/api/admin/config/smtp", dependencies=[Depends(require_admin)])
+    def update_smtp_config(form: SMTPForm):
+        return save_smtp(managed['smtp'], form, settings)
+
+    @app.post("/api/admin/config/smtp/test", dependencies=[Depends(require_admin)])
+    def test_smtp_config():
+        # Explicit, rate-limited test email to preconfigured admins, never arbitrary recipients.
+        from .emailer import send_test_message
+        from .database import allow_smtp_probe
+        current = load_smtp(managed['smtp'], settings)
+        if not (current.smtp_host and current.smtp_from and current.smtp_to):
+            raise HTTPException(400, 'Configure SMTP sender, server and recipients first')
+        if not allow_smtp_probe(settings.db_path):
+            raise HTTPException(429, 'SMTP test limited to once every 5 minutes')
+        try:
+            send_test_message(current)
+        except Exception:
+            log.warning('Admin SMTP test failed', exc_info=True)
+            raise HTTPException(502, 'SMTP relay rejected the test; inspect server logs')
+        return {'status': 'sent_to_relay', 'message': 'Relay accepted SMTP test; verify it arrived in the admin inbox.'}
+
+    @app.get("/api/admin/config/networks", dependencies=[Depends(require_admin)])
+    def get_network_config():
+        data = managed['mappings'].read_text(encoding='utf-8')
+        return {'csv_text': data, 'count': len(app.state.mapping.entries)}
+
+    @app.put("/api/admin/config/networks", dependencies=[Depends(require_admin)])
+    def update_network_config(form: CSVForm):
+        try:
+            new_mapping = put_mappings(managed['mappings'], form.csv_text)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(422, str(exc))
+        app.state.mapping = new_mapping
+        return {'status': 'saved', 'count': len(new_mapping.entries)}
+
+    @app.get("/api/admin/config/networks.csv", dependencies=[Depends(require_admin)])
+    def download_network_config():
+        return Response(managed['mappings'].read_text(encoding='utf-8'), media_type='text/csv',
+                        headers={'Content-Disposition': 'attachment; filename="gmcs-private-networks.csv"'})
+
+    @app.get("/api/admin/config/agents", dependencies=[Depends(require_admin)])
+    def get_agent_config():
+        return {'agents': list_agents(managed['agents'])}
+
+    @app.post("/api/admin/config/agents", dependencies=[Depends(require_admin)])
+    def create_agent_config(form: AgentForm):
+        try:
+            new_agents, key = put_agent(managed['agents'], form)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        app.state.agents = new_agents
+        # Return the secret exactly once. Admin should save it to the chosen school machine.
+        return {'agent_id': form.agent_id, 'allowed_cidr': form.allowed_cidr, 'one_time_token': key}
+
+    @app.delete("/api/admin/config/agents/{agent_id}", dependencies=[Depends(require_admin)])
+    def delete_agent_config(agent_id: str):
+        if not AGENT_ID_RE.fullmatch(agent_id):
+            raise HTTPException(422, 'Invalid agent ID')
+        try:
+            app.state.agents = remove_agent(managed['agents'], agent_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+        return {'status': 'revoked'}
 
     @app.get("/api/admin/results", dependencies=[Depends(require_admin)])
     def results(limit: int = Query(100, ge=1, le=500), school: str | None = None, vlan: str | None = None):

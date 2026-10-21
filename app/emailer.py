@@ -12,6 +12,32 @@ from .database import set_email_status, failed_notification
 log = logging.getLogger(__name__)
 
 
+def send_test_message(settings):
+    """Send one explicit administrative diagnostic only to configured recipients."""
+    message = EmailMessage()
+    message['Subject'] = '[GMCS Inside Speed Test] SMTP configuration check'
+    message['From'] = settings.smtp_from
+    message['To'] = ', '.join(settings.smtp_to)
+    message.set_content('The GMCS Inside Speed Test server was able to hand off this SMTP check to the configured relay.\n\nNo school speed test was performed.\n')
+    _smtp_send(settings, message)
+
+
+def _smtp_send(settings, message):
+    context = ssl.create_default_context()
+    if settings.smtp_tls_mode == 'ssl':
+        connection = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=12, context=context)
+    else:
+        connection = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
+    with connection as client:
+        client.ehlo()
+        if settings.smtp_tls_mode == 'starttls':
+            client.starttls(context=context)
+            client.ehlo()
+        if settings.smtp_username:
+            client.login(settings.smtp_username, settings.smtp_password)
+        client.send_message(message)
+
+
 def send_result(settings, result_id: int, record: dict) -> None:
     if not settings.smtp_host or not settings.smtp_to or not settings.smtp_from:
         set_email_status(settings.db_path, result_id, "disabled")
@@ -48,19 +74,7 @@ def send_result(settings, result_id: int, record: dict) -> None:
     # A small number of retries handle temporary SMTP relay failures.
     for attempt in range(3):
         try:
-            context = ssl.create_default_context()
-            if settings.smtp_tls_mode == 'ssl':
-                connection = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=12, context=context)
-            else:
-                connection = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
-            with connection as client:
-                client.ehlo()
-                if settings.smtp_tls_mode == 'starttls':
-                    client.starttls(context=context)
-                    client.ehlo()
-                if settings.smtp_username:
-                    client.login(settings.smtp_username, settings.smtp_password)
-                client.send_message(message)
+            _smtp_send(settings, message)
             set_email_status(settings.db_path, result_id, 'sent')
             return
         except Exception:

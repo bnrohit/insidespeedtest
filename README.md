@@ -9,7 +9,7 @@ Secure-by-design, self-hosted **school-to-NOC network speed test** with a browse
 - **Any student/staff on an approved GMCS school network** visits `https://<your-internal-speedtest-domain>` and presses **Start Speed Test**. No account, key or Linux agent is needed for the browser. The website records a result for every completed test (client IP, mapped school and VLAN, download/upload, HTTP latency/jitter, timestamp). Neither user name nor message history is collected.
 - **School Linux caching servers** can run `agent/school_agent.py` on a staggered systemd timer every morning, with a unique per-server API key pinned to the server's expected source subnet. These results appear alongside browser tests as *Scheduled Linux agent*.
 - **Email deduplication (default rolling 24 hours per school + VLAN):** the first successful completed browser **or** agent test queues one email to fixed admin recipients. The next 99 (or 999) tests for the same school/VLAN are recorded but marked `suppressed` for email. Different schools with the same VLAN ID each receive their own email. A failed SMTP attempt has a minimum 15-minute retry holdoff before another test may trigger a retry. School/VLAN *Unknown* is shown honestly and never guessed. Admins can view all results and email statuses at `/admin`.
-- **Concurrency:** default max 20 active tests district-wide and 4 per school/VLAN group. Browser tests automatically retry a busy server for up to ~10 minutes; unauthorized users cannot bypass the approved client CIDR allowlist. Per-source-IP cooldown and data-transfer caps protect bandwidth. Rate limits can affect users behind the same source NAT address.
+- **Concurrency:** default max 20 active tests district-wide and 4 per school/VLAN group. Browser tests automatically retry a busy server for up to ~2.5 minutes; unauthorized users cannot bypass the approved client CIDR allowlist. Per-source-IP cooldown and data-transfer caps protect bandwidth. Rate limits can affect users behind the same source NAT address.
 
 ## VM setup (Ubuntu guest on XCP-ng)
 
@@ -22,9 +22,7 @@ mkdir -p private
 cp .env.example .env
 cp config/networks.csv private/networks.csv
 cp config/agents.csv private/agents.csv
-chmod 600 .env
-# Private CSVs must be readable by the unprivileged UID/GID 10001 in Docker.
-sudo chown root:10001 private/*.csv && sudo chmod 640 private/*.csv
+chmod 600 .env private/*.csv
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))' # paste as ADMIN_PASSWORD in .env
 nano .env
 nano private/networks.csv
@@ -49,7 +47,7 @@ vlan,EXAMPLE-HS,56,10.44.2.0/24,Student example only
 
 Don't use these examples as actual GMCS mappings. VLAN IDs are *not* included in normal HTTP packets. The application can identify VLAN only via a verified uniquely assigned source subnet and will show **Unknown** if no VLAN match is possible. If NOC proxies or NAT the traffic, the server sees the proxy/NAT IP and school/VLAN lookup may be wrong; fix routing or add a trusted per-school source observation path, rather than blindly trusting browser-submitted school names.
 
-`ALLOWED_CLIENT_CIDRS` in `.env` should contain **only approved GMCS routed campus networks and your required admin/agent networks**; do not blindly leave the permissive private-network demonstration defaults. `TRUSTED_PROXY_CIDRS` should include loopback only when the reverse proxy actually overwrites both `X-Real-IP` and `X-Forwarded-Proto`. Health-check `/healthz` is exempt from CIDR checks but is reachable only on the loopback listener if deployed as instructed. VLAN mapping is reloaded on container restart.
+`ALLOWED_CLIENT_CIDRS` in `.env` should contain **only approved GMCS routed campus networks and your required admin/agent networks**; do not blindly leave the permissive private-network demonstration defaults. `TRUSTED_PROXY_CIDRS` should include loopback only when the reverse proxy actually overwrites both `X-Real-IP` and `X-Forwarded-Proto`. Health-check `/healthz` is exempt from CIDR checks but is reachable only on the loopback listener if deployed as instructed. The initial private inventory is copied into the persistent data volume on the first startup; after that, edit it in the admin GUI. A GUI save takes effect immediately, without rebuilding or restarting Docker.
 
 ### Set up SMTP / suppress duplicate emails
 
@@ -116,7 +114,7 @@ Use `/admin` over HTTPS, preferably restrict to network admin management IPs at 
 - An authenticated school agent uses a per-server token, verified over TLS, and bound to its observed network IP range. Browsers need no key and cannot impersonate an agent without a valid token.
 - Tests measure **between browser/cache and the VM**, not external Internet speed, and clients can falsify their own speed figures. This is an operational diagnostic tool, not a cryptographic measurement.
 - A one-shot SMTP background task may be interrupted if the application process is stopped at just the wrong moment; review `queued`/`failed` statuses and SMTP logs. Delivery is not guaranteed until verified at the admin mailbox.
-- Email suppression is *per school+VLAN*, across both agent and browser runs, not per student/device and not district-wide. Unknown/unmapped visitors are combined into one global 24-hour email bucket to avoid an SMTP alert flood. Their individual records still keep observed source IP, but school/VLAN remain **Unknown** until NetBox/DHCP mapping is configured. Check mappings before relying on VLAN attribution.
+- Email suppression is *per school+VLAN*, across both agent and browser runs, not per student/device and not district-wide. Unknown school groups use observed source IP to avoid combining unrelated unmapped sites. Check mappings before relying on VLAN attribution.
 
 Test locally (no real SMTP or district networks needed):
 
@@ -128,4 +126,17 @@ ADMIN_PASSWORD=TEST_ONLY_A_LONG_RANDOM_ADMIN_PASSWORD pytest -q
 python -m compileall -q app agent
 ```
 
-The included tests exercise IP spoofing rejection, internal CIDR allowlist, download/upload token budget, SMTP notification deduplication under 100 simultaneous results, failed-email backoff and session concurrency limits. CI is configured under `.github/workflows/` to run tests, dependency/static security checks and CodeQL; Dependabot is configured for dependency update pull requests. These checks must actually run and be reviewed—they are not proof of a flaw-free application. Before district production, validate a real switch/VLAN gateway, NAT behavior, group notification behavior, admin access restrictions, certificates, SMTP email arrival and actual school-to-VM throughput.
+The included tests exercise IP spoofing rejection, internal CIDR allowlist, download/upload token budget, SMTP notification deduplication under 100 simultaneous results, failed-email backoff and session concurrency limits. CI is configured under `.github/workflows/` to run tests and dependency/static security checks. Before district production, validate a real switch/VLAN gateway, NAT behavior, group notification behavior, admin access restrictions, certificates, SMTP email arrival and actual school-to-VM throughput.
+
+
+## GUI management (v2)
+
+Once the app is deployed behind district HTTPS and the admin password has been configured, open **`https://<internal-domain>/admin`**. The Configuration center now provides:
+
+1. **SMTP server** — configure hostname/IP, port, TLS mode, sender, fixed admin recipients, optional SMTP login/password, email source toggles, and per-school/VLAN notification cooldown. Select **Save SMTP settings**; no message is sent on saving. Then select **Send one test email** (limited to once per five minutes) and check the destination mailbox and relay logs. The test sends only to already-configured admins.
+2. **School/VLAN mappings** — paste or edit the `scope,school,vlan,cidr,label` CSV, then select **Validate & save inventory**. Invalid overlapping VLAN identities and public ranges are rejected; valid changes are immediately used by subsequent tests. Use **Export private CSV** for a backup. The browser never invents VLAN IDs.
+3. **Scheduled school servers** — register `SCHOOL-CACHE01` with the specific client-source address such as `10.x.y.z/32`. The application generates a random key and displays it **once**, then stores only a SHA-256 verifier. Install it on that server with `agent/install.sh`; revoke agents from the admin table. This is *optional*: all approved users may still click **Start Speed Test** without accounts.
+
+**Durability & security:** The running container writes admin-edited SMTP settings, mappings, and server credentials into `/data/managed/` (the existing persistent Docker volume). Files have mode 0600 and live only inside the private VM, not inside Git or build images. SMTP passwords in `/data/managed/smtp.json` are **not encrypted at rest**; protect the VM and volume and consider an external secret manager for high-assurance environments. The initial `private/networks.csv` and `private/agents.csv` files are imported **once** at first startup. Editing them later has no effect until imported through the GUI. Updates to GitHub do not change your deployed configuration. The server uses one worker to keep in-process mappings synchronized with the GUI.
+
+**GMCS-specific deployment:** Set the district's approved relay and routing in the admin GUI; the public repository deliberately ships with **no actual network inventory, SMTP relay address, senders, recipient addresses, or credentials**. Do not push the private deployment bundle or copy `.env`, `private/`, `/data/managed`, exported inventory, or agent credentials to GitHub. You must supply authoritative routing/DHCP/NetBox inventory to cover all district sites: example/pattern-based subnet guesses are not proof of live assignments. TLS settings and mail relay permissions must be verified on the VM. Admin access should be blocked from non-management networks at the reverse proxy/firewall and, ideally, protected by district SSO/MFA.
