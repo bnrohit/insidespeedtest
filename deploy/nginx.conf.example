@@ -1,4 +1,4 @@
-# Internal-only reverse proxy: ensure GMCS internal DNS and firewall access to 443.
+# Requires NGINX stable >=1.30.6 or mainline >=1.31.7.\n# Run: sudo bash deploy/security-preflight.sh\n# Internal-only reverse proxy: ensure GMCS internal DNS and firewall access to 443.
 # Replace placeholder hostname/cert paths. Keep backend 8080 on LOOPBACK ONLY.
 limit_req_zone $binary_remote_addr zone=gmcs_session:10m rate=4r/m;
 limit_conn_zone $binary_remote_addr zone=gmcs_conn:10m;
