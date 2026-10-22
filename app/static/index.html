@@ -2,8 +2,17 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GMCS Inside Speed Test</title><link rel="stylesheet" href="/static/style.css"></head>
 <body><main class="shell">
-  <header class="topbar"><div class="brand"><div class="mark">G</div><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><a href="/admin" class="quiet-link">Admin dashboard ↗</a></header>
+  <header class="topbar"><div class="brand"><img id="brand-logo" class="brand-logo" src="/static/gmcs-logo.png" alt="Gallup-McKinley County Schools logo" width="98" height="88"><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><a href="/admin" class="quiet-link">Admin dashboard ↗</a></header>
   <section class="hero"><div class="eyebrow">INTERNAL NETWORK DIAGNOSTICS</div><h1>Inside <em>Speed Test</em></h1><p>Measure your school's connection to the GMCS-hosted test server. Results can help network administrators investigate performance across sites.</p></section>
+  <section class="brand-editor" aria-label="Customize your displayed logo">
+    <div class="brand-editor-copy"><strong>Personalize this page</strong><span>Use your own school or organization logo on this browser. Other users will still see their own choice or the GMCS default.</span></div>
+    <div class="brand-editor-actions">
+      <button id="brand-upload-button" class="secondary-btn" type="button">Upload logo</button>
+      <input id="brand-logo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="Choose a PNG, JPEG, or WebP logo">
+      <button id="brand-reset-button" class="secondary-btn" type="button" hidden>Restore GMCS logo</button>
+    </div>
+    <p id="brand-message" class="brand-message" role="status" aria-live="polite"></p>
+  </section>
   <section class="panel identity"><div><small>DETECTED SCHOOL</small><strong id="school">Detecting…</strong></div><div><small>VLAN</small><strong id="vlan">—</strong></div><div><small>CLIENT IP</small><strong id="ip">—</strong></div></section>
   <section class="panel test-card"><div class="test-top"><span id="status" aria-live="polite">Ready to measure your connection</span><span class="pill">GMCS LAN TEST</span></div>
   <div class="dial"><div class="dial-inner"><div id="live-value" class="live-value">0.0</div><div class="unit">Mbps</div><div id="phase">READY</div></div></div>
@@ -14,4 +23,4 @@
   <div id="send-email-panel" hidden><button type="button" id="send-email" class="secondary-btn">Email my results to GMCS admins</button>
   <p class="caption" id="send-email-status" role="status">Results go only to the GMCS admin recipients configured on this server.</p></div></section>
   <footer><div>Only for authorized GMCS network users. School/VLAN labels depend on maintained IP mappings.</div><div>Tests measure throughput <strong>to this internal VM</strong>, not ISP Internet speed.</div></footer>
-</main><script src="/static/test.js" defer></script></body></html>
+</main><script src="/static/branding.js" defer></script><script src="/static/test.js" defer></script></body></html>

@@ -208,3 +208,13 @@ sudo bash deploy/nginx-version-audit.sh
 The `--apply` command stops/masks the **Avahi daemon and socket** when present and blocks inbound UDP/5353 using UFW **only if UFW is already active**. It does **not** automatically enable a firewall, restart DNS, alter school switches or install/upgrade Nginx. If `systemd-resolved` or another responder still advertises mDNS, disable `MulticastDNS` in an approved maintenance window and verify again. At the host / routed network firewall, deny unwanted IPv4 and IPv6 UDP/5353 inbound to this VM, including any inter-VLAN mDNS reflector exceptions. Never disable Avahi on **every school server** blindly; this script is intended for the dedicated speed-test VM.
 
 Finally perform an **authorized external vantage-point scan** from a separate VLAN: check HTTPS/443, HTTP/8080 blocked externally, UDP/5353 absent, and any Nessus Bonjour findings. For UDP a generic port scanner can report `open|filtered` inconclusively; absence of a listening process and lack of mDNS responses from the scanner segment are stronger evidence. Nessus can report other vulnerabilities despite these controls, so review and patch findings continuously.
+
+
+## Client branding
+
+The public speed-test page now displays the official GMCS district logo by default.
+Users can click **Upload logo** to display a PNG/JPEG/WebP logo (up to 2 MB) on
+their own device. The file is converted to PNG and stored only in the browser's
+`localStorage`—**no client-supplied image reaches the server or changes the logo
+for other users**. Use **Restore GMCS logo** to return to the default. Private
+network, Nginx, SMTP and admin settings remain unchanged during the safe upgrade.

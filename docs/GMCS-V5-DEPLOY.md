@@ -49,3 +49,18 @@ Use a private browser window for first sign-in at `https://10.250.31.192:18443/a
 Security: keep private credentials, actual school mapping files, and `.env` **out of public GitHub**. Rotate any admin password previously pasted into logs or chat. Limit admin-network access to authorized staff networks where possible. Keep `ALLOW_LEGACY_BASIC_API=false` for reliable logout.
 
 Local unit/integration tests: `python -m pytest -q` with dependencies from `requirements-dev.txt`. Passing tests do not substitute for a live SMTP relay and client-browser test on the Debian host.
+
+## Client logo upload (GMCS branding update)
+
+The client-facing homepage now displays the supplied Gallup-McKinley County Schools
+logo by default. Every client may choose **Upload logo**, select a PNG/JPEG/WebP
+image up to 2 MB, and restore the GMCS logo using **Restore GMCS logo**. Images are
+converted in the browser into a small PNG; only that browser stores the image in
+`localStorage`. No image is uploaded to the server, other browsers do not see it,
+and uploads never alter official GMCS or other clients' branding.
+
+To upgrade a running customized GMCS installation, use the same separate checkout
+plus `sudo bash .../deploy/gmcs-safe-upgrade.sh` described above. This revision
+adds only `app/static/branding.js` and `app/static/gmcs-logo.png` to the audited
+file allowlist. Existing private IP mappings, Nginx rules, SMTP, `.env`, and Compose
+overrides are neither imported from GitHub nor overwritten.
