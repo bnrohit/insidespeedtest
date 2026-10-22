@@ -10,6 +10,8 @@
   <div class="progress-track"><div id="progress" class="progress-bar"></div></div>
   <button id="start" class="start-btn">START SPEED TEST <span>→</span></button>
   <div class="metrics"><div class="metric"><div class="metric-icon">↓</div><small>DOWNLOAD</small><strong id="download">—</strong><span>Mbps</span></div><div class="metric"><div class="metric-icon">↑</div><small>UPLOAD</small><strong id="upload">—</strong><span>Mbps</span></div><div class="metric"><div class="metric-icon">↔</div><small>LATENCY</small><strong id="latency">—</strong><span>ms</span></div><div class="metric"><div class="metric-icon">⌁</div><small>JITTER</small><strong id="jitter">—</strong><span>ms</span></div></div>
-  <p class="result-message" id="result-message" role="status"></p></section>
+  <p class="result-message" id="result-message" role="status"></p>
+  <div id="send-email-panel" hidden><button type="button" id="send-email" class="secondary-btn">Email my results to GMCS admins</button>
+  <p class="caption" id="send-email-status" role="status">Results go only to the GMCS admin recipients configured on this server.</p></div></section>
   <footer><div>Only for authorized GMCS network users. School/VLAN labels depend on maintained IP mappings.</div><div>Tests measure throughput <strong>to this internal VM</strong>, not ISP Internet speed.</div></footer>
 </main><script src="/static/test.js" defer></script></body></html>

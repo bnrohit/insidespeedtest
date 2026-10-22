@@ -8,6 +8,7 @@ import time
 from email.message import EmailMessage
 
 from .database import set_email_status, failed_notification
+from .client_email import update_client_email
 
 log = logging.getLogger(__name__)
 
@@ -38,15 +39,18 @@ def _smtp_send(settings, message):
         client.send_message(message)
 
 
-def send_result(settings, result_id: int, record: dict) -> None:
+def send_result(settings, result_id: int, record: dict, manual: bool = False) -> None:
     if not settings.smtp_host or not settings.smtp_to or not settings.smtp_from:
-        set_email_status(settings.db_path, result_id, "disabled")
+        if manual:
+            update_client_email(settings.db_path, result_id, 'disabled')
+        else:
+            set_email_status(settings.db_path, result_id, "disabled")
         return
     message = EmailMessage()
     # Config-only fields could still contain newline; never allow email header injection.
     clean_school = str(record['school']).replace('\r', ' ').replace('\n', ' ')[:80]
     clean_agent = str(record.get('agent_id') or 'Manual browser').replace('\r', ' ').replace('\n', ' ')[:64]
-    message['Subject'] = (f"[GMCS Inside Speed Test] {clean_school} | "
+    message['Subject'] = (f"[GMCS Inside Speed Test]{'[Client Request]' if manual else ''} {clean_school} | "
                           f"VLAN {record['vlan']} | "
                           f"{'Scheduled ' + clean_agent if record.get('agent_id') else 'Manual'} | "
                           f"{record['download_mbps']:.1f} Mbps down")
@@ -75,10 +79,17 @@ def send_result(settings, result_id: int, record: dict) -> None:
     for attempt in range(3):
         try:
             _smtp_send(settings, message)
-            set_email_status(settings.db_path, result_id, 'sent')
+            (update_client_email if manual else set_email_status)(settings.db_path, result_id, 'sent')
             return
         except Exception:
             log.warning('SMTP delivery attempt %d failed for result #%d', attempt + 1, result_id, exc_info=True)
             if attempt < 2:
                 time.sleep(2 * (attempt + 1))
-    failed_notification(settings.db_path, result_id)
+    if manual:
+        update_client_email(settings.db_path, result_id, 'failed')
+    else:
+        failed_notification(settings.db_path, result_id)
+
+
+def send_client_result(settings, result_id: int, record: dict) -> None:
+    send_result(settings, result_id, record, manual=True)

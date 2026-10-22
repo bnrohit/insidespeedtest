@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS admin_smtp_probe (
 CREATE TABLE IF NOT EXISTS admin_failures (
  client_ip TEXT NOT NULL, attempted_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS admin_sessions (
+ token_hash TEXT PRIMARY KEY, csrf_token TEXT NOT NULL, client_ip TEXT NOT NULL,
+ password_tag TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_exp ON admin_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS client_email_gates (
+ group_key TEXT PRIMARY KEY, last_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS client_email_audit (
+ client_ip TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_email_audit ON client_email_audit(client_ip,created_at);
 CREATE INDEX IF NOT EXISTS idx_admin_failures ON admin_failures(client_ip, attempted_at);
 """
 
@@ -68,6 +80,8 @@ def init_db(db_path: str) -> None:
             ("sessions", "group_key", "TEXT NOT NULL DEFAULT ''"),
             ("sessions", "download_reserved", "INTEGER NOT NULL DEFAULT 0"),
             ("sessions", "upload_reserved", "INTEGER NOT NULL DEFAULT 0"),
+            ("sessions", "result_id", "INTEGER"),
+            ("results", "client_email_status", "TEXT NOT NULL DEFAULT 'not_requested'"),
             ("results", "agent_id", "TEXT NOT NULL DEFAULT ''"),
         ]:
             existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
@@ -149,8 +163,7 @@ def reserve_transfer(db_path: str, token_hash: str, ip: str, amount: int,
     """Reserve transfer allowance before sending/receiving; atomic across requests."""
     if direction not in ("download", "upload") or amount <= 0:
         return False
-    # SQL column identifiers must never be interpolated into query text.
-    # Keep both statements constant and bind all runtime values as parameters.
+    # Constant SQL column identifiers; never interpolate dynamic column names.
     if direction == "download":
         statement = """UPDATE sessions SET download_reserved=download_reserved+?
           WHERE token_hash=? AND client_ip=? AND used_at IS NULL AND created_at>=?
@@ -204,7 +217,9 @@ def save_result(db_path: str, token_hash: str, ip: str, record: dict, ttl_second
              record["jitter_ms"], record["packet_loss_pct"],
              record["download_bytes"], record["upload_bytes"]),
         )
-        return int(cur.lastrowid), agent_id
+        result_id = int(cur.lastrowid)
+        con.execute("UPDATE sessions SET result_id=? WHERE token_hash=?", (result_id, token_hash))
+        return result_id, agent_id
 
 
 def set_email_status(db_path: str, result_id: int, status: str) -> None:

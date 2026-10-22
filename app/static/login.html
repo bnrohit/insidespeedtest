@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin sign in | GMCS Inside Speed Test</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell"><header class="topbar"><div class="brand"><div class="mark">G</div><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><a class="quiet-link" href="/">← Speed test</a></header>
+<section class="hero"><div class="eyebrow">AUTHORIZED ADMINISTRATION</div><h1>Administrator <em>Sign In</em></h1><p>Each browser receives its own eight-hour login session. Logging out ends only that browser's session.</p></section>
+<section class="panel" class="login-panel"><form id="admin-login">
+<label for="username">Username</label><input id="username" name="username" autocomplete="username" required maxlength="128" value="gmcsadmin">
+<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit" id="login-btn" class="start-btn">Sign in</button>
+<p role="status" id="login-status" class="result-message" aria-live="polite"></p></form></section>
+<footer>Authorized GMCS administrators only. Protect your login credentials.</footer></main>
+<script src="/static/login.js" defer></script></body></html>

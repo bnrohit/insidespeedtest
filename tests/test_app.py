@@ -8,7 +8,7 @@ def setup_client(tmp_path, **kwargs):
     config = tmp_path/'network.csv'
     config.write_text('scope,school,vlan,cidr,label\nschool,GPHS,,10.44.0.0/20,GPHS campus\nvlan,GPHS,48,10.44.1.0/24,Staff\n')
     settings = Settings(db_path=str(tmp_path/'test.db'),mapping_path=str(config),admin_username='admin',admin_password='test_password_1234567890',cooldown_seconds=30,
-                        admin_client_cidrs='10.0.0.0/8,127.0.0.0/8',**kwargs)
+                        admin_client_cidrs='10.0.0.0/8,127.0.0.0/8',allow_legacy_basic_api=True,**kwargs)
     return TestClient(create_app(settings),base_url='https://testserver',client=('10.44.1.50',31337))
 
 
@@ -17,7 +17,7 @@ def test_full_test_flow_and_auth(tmp_path):
     assert client.get('/healthz').json()=={'status':'ok'}
     identity = client.get('/api/identity').json()
     assert identity['school']=='GPHS' and identity['vlan']=='48' and identity['client_ip']=='10.44.1.50'
-    assert client.get('/admin').status_code==401
+    assert client.get('/admin').status_code==200  # v5 serves a login form to unauthenticated users
     assert client.get('/api/admin/results').status_code==401
     assert client.get('/admin',auth=('admin','test_password_1234567890')).status_code==200
     assert client.get('/api/download?bytes=1024').status_code==401

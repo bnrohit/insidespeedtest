@@ -1,5 +1,6 @@
 'use strict';
 const el=id=>document.getElementById(id);
+let csrfToken='';
 const cell=(row,value,className)=>{const td=document.createElement('td');td.textContent=String(value??'—');if(className)td.className=className;row.append(td);};
 const req=async url=>{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw Error(`HTTP ${response.status}`);return response.json();};
 async function refresh(){
@@ -21,7 +22,7 @@ async function refresh(){
       cell(tr,r.vlan);cell(tr,r.agent_id || 'Browser');cell(tr,r.client_ip);cell(tr,Number(r.download_mbps).toFixed(1)+' Mbps');
       cell(tr,Number(r.upload_mbps).toFixed(1)+' Mbps');
       cell(tr,Number(r.latency_ms).toFixed(1)+' ms');cell(tr,Number(r.jitter_ms).toFixed(1)+' ms');
-      cell(tr,r.email_status);el('rows').append(tr);
+      cell(tr,r.email_status);cell(tr,r.client_email_status);el('rows').append(tr);
     }
     el('schools').replaceChildren();
     for(const r of summary.schools){const tr=document.createElement('tr');cell(tr,r.school);cell(tr,r.tests);cell(tr,r.avg_down+' Mbps');cell(tr,r.avg_up+' Mbps');el('schools').append(tr);}
@@ -31,11 +32,10 @@ async function refresh(){
 el('refresh').addEventListener('click',refresh);
 el('school-filter').addEventListener('keydown',e=>{if(e.key==='Enter')refresh();});
 el('vlan-filter').addEventListener('keydown',e=>{if(e.key==='Enter')refresh();});
-refresh();
 
 
 const postConfig=async (url, method, body)=>{
-  const response=await fetch(url,{method,cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const response=await fetch(url,{method,cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(body)});
   let data;try{data=await response.json();}catch(_){data={detail:'Unexpected server response'};}
   if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||`HTTP ${response.status}`));
   return data;
@@ -99,7 +99,7 @@ function drawAgents(rows){
     button.type='button';button.textContent='Revoke';button.className='secondary-btn';
     button.addEventListener('click',async()=>{
       if(!confirm(`Revoke token for ${item.agent_id}? This server will no longer authenticate.`))return;
-      try{const res=await fetch('/api/admin/config/agents/'+encodeURIComponent(item.agent_id),{method:'DELETE'});
+      try{const res=await fetch('/api/admin/config/agents/'+encodeURIComponent(item.agent_id),{method:'DELETE',headers:{'X-CSRF-Token':csrfToken}});
         if(!res.ok)throw Error('HTTP '+res.status);
         el('agents-status').textContent='Revoked '+item.agent_id;
         drawAgents((await req('/api/admin/config/agents')).agents);
@@ -123,7 +123,6 @@ el('copy-agent').addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(el('agent-secret').value);el('agents-status').textContent='Token copied; protect clipboard and paste directly into school server secret file.';}
   catch(err){el('agents-status').textContent='Select and copy token manually.';}
 });
-loadConfig();
 
 // Query the exact, active mapping without touching production networking.
 el('lookup-btn').addEventListener('click',async()=>{
@@ -156,3 +155,27 @@ el('append-mapping').addEventListener('click',()=>{
   el('append-mapping-status').textContent='Added to editor. Now select Validate & save inventory. Existing settings are unchanged until saved.';
   editor.focus();
 });
+
+async function initializeAdmin(){
+  try{
+    const session=await req('/api/admin/session');
+    csrfToken=session.csrf_token;
+    await Promise.all([refresh(),loadConfig()]);
+  }catch(err){
+    window.location.replace('/admin');
+  }
+}
+el('logout').addEventListener('click',async()=>{
+  const button=el('logout');button.disabled=true;
+  try{
+    const response=await fetch('/api/admin/logout',{
+      method:'POST',cache:'no-store',headers:{'X-CSRF-Token':csrfToken}
+    });
+    if(!response.ok)throw Error(`HTTP ${response.status}`);
+    window.location.replace('/admin');
+  }catch(err){
+    button.disabled=false;
+    el('admin-status').textContent='Unable to log out: '+err.message;
+  }
+});
+initializeAdmin();

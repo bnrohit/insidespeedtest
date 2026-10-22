@@ -17,7 +17,7 @@ def client(tmp_path):
     agents.write_text('agent_id,token_sha256,allowed_cidr\n')
     settings=Settings(db_path=str(tmp_path/'data'/'results.db'),mapping_path=str(mapping),
                       agents_path=str(agents),admin_username='admin',admin_password='TESTPASSWORD_LONG_123456',
-                      admin_client_cidrs='10.12.0.0/16')
+                      admin_client_cidrs='10.12.0.0/16', allow_legacy_basic_api=True)
     app=create_app(settings)
     return TestClient(app,base_url='https://testserver',client=('10.12.48.50',4444)),settings
 

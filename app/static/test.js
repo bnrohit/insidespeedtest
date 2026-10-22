@@ -2,6 +2,7 @@
 const el = (id) => document.getElementById(id);
 const start = el('start');
 let running = false;
+let emailReceipt = null;
 let latestMbps = 0;
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
 const fmt = n => Number(n).toFixed(1);
@@ -100,6 +101,7 @@ async function throughput(mode,seconds,streams,onValue,token) {
 start.addEventListener('click',async()=>{
   if(running)return;
   running=true;start.disabled=true;
+  emailReceipt=null;el('send-email-panel').hidden=true;
   el('result-message').textContent='';el('download').textContent='—';el('upload').textContent='—';
   el('latency').textContent='—';el('jitter').textContent='—';el('live-value').textContent='0.0';
   try {
@@ -132,9 +134,41 @@ start.addEventListener('click',async()=>{
     },session.token);
     const answer=await jsonApi('/api/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:session.token,download_mbps:down.mbps,upload_mbps:up.mbps,download_bytes:down.bytes,upload_bytes:up.bytes,...ping})});
     updateProgress(100,'Completed • Result #' + answer.result_id,'COMPLETE');
-    el('result-message').textContent=`Recorded for ${answer.school}, VLAN ${answer.vlan}. Email: ${answer.email_notification === 'suppressed' ? 'already notified for this school/VLAN in the last 24 hours' : answer.email_notification}.`;
+    el('result-message').textContent=`Recorded for ${answer.school}, VLAN ${answer.vlan}. Automatic notification: ${answer.email_notification}.`;
+    if(answer.client_email_available){
+      el('send-email-panel').hidden=false;
+      if(answer.client_email_already_notified){
+        emailReceipt=null;
+        el('send-email').disabled=true;
+        el('send-email').textContent='Result already sent to admin queue';
+        el('send-email-status').textContent='The automatic admin notification is already queued. No need to send another copy.';
+      }else{
+        emailReceipt={resultId:answer.result_id,token:session.token};
+        el('send-email').disabled=false;
+        el('send-email').textContent='Email my results to GMCS admins';
+        el('send-email-status').textContent='Optional: send this completed test to GMCS administrators. One request per result; limits apply.';
+      }
+    }
   }catch(err){
     updateProgress(0,'Test did not complete','ERROR');el('result-message').textContent=err.message;
   }finally{running=false;start.disabled=false;}
 });
 init();
+
+el('send-email').addEventListener('click',async()=>{
+  if(!emailReceipt)return;
+  const button=el('send-email');button.disabled=true;
+  try{
+    const response=await fetch(`/api/results/${emailReceipt.resultId}/email`,{
+      method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:emailReceipt.token})
+    });
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.detail||`HTTP ${response.status}`);
+    el('send-email-status').textContent='Result queued for GMCS administrators. Email delivery is confirmed by the admin dashboard.';
+    emailReceipt=null;
+  }catch(err){
+    el('send-email-status').textContent='Email request was not accepted: '+err.message;
+    if(![409,429].includes(Number((err.message.match(/HTTP (\d+)/)||[])[1])))button.disabled=false;
+  }
+});

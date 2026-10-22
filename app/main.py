@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
 import io
 import ipaddress
@@ -14,7 +15,6 @@ from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,7 +22,9 @@ from .agents import Agents, AGENT_ID_RE
 from .database import (admin_blocked, admin_failure, admin_success, connect, create_session,
                        init_db, reserve_transfer, save_result, valid_session, set_email_status,
                        notification_group, claim_notification)
-from .emailer import send_result
+from .emailer import send_result, send_client_result
+from .admin_auth import COOKIE_NAME, SESSION_SECONDS, new_session as new_admin_session, find_session, revoke_session
+from .client_email import claim_email, EmailClaimError
 from .identity import IdentityMatcher
 from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
                          smtp_public_config, save_smtp, put_mappings, list_agents,
@@ -31,7 +33,6 @@ from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
 log = logging.getLogger(__name__)
 APP_ROOT = Path(__file__).resolve().parent
 CHUNK = os.urandom(256 * 1024)  # incompressible for useful throughput measurement
-security = HTTPBasic(auto_error=False)
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -51,6 +52,7 @@ class Settings:
     allowed_client_cidrs: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
     trusted_proxy_cidrs: str = ""
     admin_require_https: bool = True
+    allow_legacy_basic_api: bool = False  # Off by default: Basic Auth defeats reliable browser logout
     admin_client_cidrs: str = "127.0.0.0/8,::1/128"
     agent_require_https: bool = True
     email_browser_results: bool = True
@@ -82,6 +84,7 @@ class Settings:
             allowed_client_cidrs=os.getenv("ALLOWED_CLIENT_CIDRS", cls.allowed_client_cidrs),
             trusted_proxy_cidrs=os.getenv("TRUSTED_PROXY_CIDRS", ""),
             admin_require_https=env_bool("ADMIN_REQUIRE_HTTPS", True),
+            allow_legacy_basic_api=env_bool("ALLOW_LEGACY_BASIC_API", False),
             admin_client_cidrs=os.getenv("ADMIN_CLIENT_CIDRS", cls.admin_client_cidrs),
             agent_require_https=env_bool("AGENT_REQUIRE_HTTPS", True),
             email_browser_results=env_bool("EMAIL_BROWSER_RESULTS", True),
@@ -102,6 +105,17 @@ class Settings:
             max_active_tests=int(os.getenv("MAX_ACTIVE_TESTS", "20")),
             max_active_per_vlan=int(os.getenv("MAX_ACTIVE_PER_VLAN", "4")),
         )
+
+
+class AdminLogin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ClientEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=30, max_length=150)
 
 
 class Report(BaseModel):
@@ -213,6 +227,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         return Response(status_code=403, content='Admin origin mismatch')
                 except ValueError:
                     return Response(status_code=403, content='Invalid admin origin')
+        # A cookie-authenticated admin action must also carry its session CSRF
+        # token. Basic credentials from old browser caches are not accepted.
+        if (request.url.path.startswith('/api/admin/') and
+                request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and
+                request.url.path != '/api/admin/login' and
+                not (settings.allow_legacy_basic_api and request.headers.get('authorization', '').startswith('Basic '))):
+            ip = get_ip(request)
+            session = find_session(settings.db_path, request.cookies.get(COOKIE_NAME, ''),
+                                   ip, settings.admin_password)
+            csrf = request.headers.get('x-csrf-token', '')
+            if not session:
+                return Response(status_code=401, content='Admin login required')
+            if not csrf or not secrets.compare_digest(csrf, session['csrf_token']):
+                return Response(status_code=403, content='Admin CSRF/session token required')
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -224,22 +252,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
 
-    def require_admin(request: Request, credentials: Annotated[HTTPBasicCredentials | None, Depends(security)]):
+    def check_admin_network(request: Request) -> str:
         ip = get_ip(request)
-        if not any(ipaddress.ip_address(ip) in network for network in app.state.admin_client_cidrs):
+        if not any(ipaddress.ip_address(ip) in net for net in app.state.admin_client_cidrs):
             raise HTTPException(403, "Admin interface is restricted to approved management networks")
         if settings.admin_require_https and not secure_transport(request):
             raise HTTPException(403, "Admin access requires HTTPS")
-        if admin_blocked(settings.db_path, ip):
-            raise HTTPException(429, "Too many failed admin logins", headers={"Retry-After": "900"})
-        if not credentials or not (
-                secrets.compare_digest(credentials.username.encode(), settings.admin_username.encode()) and
-                secrets.compare_digest(credentials.password.encode(), settings.admin_password.encode())):
-            admin_failure(settings.db_path, ip)
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Admin credentials required",
-                                headers={"WWW-Authenticate": 'Basic realm="GMCS Speed Test Admin"'})
-        admin_success(settings.db_path, ip)
-        return True
+        return ip
+
+    def admin_session(request: Request):
+        ip = check_admin_network(request)
+        return find_session(settings.db_path, request.cookies.get(COOKIE_NAME, ''),
+                            ip, settings.admin_password)
+
+    def legacy_basic_authorized(request: Request) -> bool:
+        # Opt-in only for pre-existing CLI API integrations. Disabling this is
+        # required for robust browser logout: Basic credentials are browser-cached.
+        if not settings.allow_legacy_basic_api:
+            return False
+        authorization = request.headers.get('authorization', '')
+        if not authorization.startswith('Basic '):
+            return False
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode('utf-8')
+            user, password = decoded.split(':', 1)
+        except (ValueError, UnicodeError):
+            return False
+        return (secrets.compare_digest(user.encode(), settings.admin_username.encode()) and
+                secrets.compare_digest(password.encode(), settings.admin_password.encode()))
+
+    def require_admin(request: Request):
+        if admin_session(request) is not None:
+            return True
+        check_admin_network(request)
+        if legacy_basic_authorized(request):
+            return True
+        raise HTTPException(401, "Admin login required")
 
     def session_token(request: Request) -> tuple[str, str]:
         ip = get_ip(request)
@@ -255,9 +303,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def home():
         return FileResponse(APP_ROOT / "static" / "index.html")
 
-    @app.get("/admin", dependencies=[Depends(require_admin)])
-    def admin():
-        return FileResponse(APP_ROOT / "static" / "admin.html")
+    @app.get("/admin")
+    def admin(request: Request):
+        return FileResponse(APP_ROOT / "static" /
+                            ("admin.html" if (admin_session(request) or legacy_basic_authorized(request)) else "login.html"))
+
+    @app.post("/api/admin/login")
+    def admin_login(request: Request, data: AdminLogin):
+        ip = check_admin_network(request)
+        if admin_blocked(settings.db_path, ip):
+            raise HTTPException(429, "Too many failed admin logins", headers={"Retry-After": "900"})
+        if not (secrets.compare_digest(data.username.encode(), settings.admin_username.encode()) and
+                secrets.compare_digest(data.password.encode(), settings.admin_password.encode())):
+            admin_failure(settings.db_path, ip)
+            raise HTTPException(401, "Invalid username or password")
+        admin_success(settings.db_path, ip)
+        token, _ = new_admin_session(settings.db_path, ip, settings.admin_password)
+        response = Response(status_code=204)
+        response.set_cookie(COOKIE_NAME, token, max_age=SESSION_SECONDS,
+                            path="/", secure=True, httponly=True, samesite="strict")
+        return response
+
+    @app.get("/api/admin/session", dependencies=[Depends(require_admin)])
+    def current_admin_session(request: Request):
+        session = admin_session(request)
+        return {"username": settings.admin_username, "csrf_token": session['csrf_token'],
+                "expires_at": session['expires_at']}
+
+    @app.post("/api/admin/logout", dependencies=[Depends(require_admin)])
+    def admin_logout(request: Request):
+        revoke_session(settings.db_path, request.cookies.get(COOKIE_NAME, ''))
+        response = Response(status_code=204)
+        response.delete_cookie(COOKIE_NAME, path="/", secure=True, httponly=True, samesite="strict")
+        return response
 
     @app.get("/healthz")
     def healthz():
@@ -362,7 +440,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             set_email_status(settings.db_path, result_id, "disabled")
         return {"result_id": result_id, "school": record["school"], "vlan": record["vlan"],
-                "agent_id": agent_id, "email_notification": email_status}
+                "agent_id": agent_id, "email_notification": email_status,
+                "client_email_available": bool(smtp_ready and not agent_id),
+                "client_email_already_notified": email_status in {'queued', 'sent'}}
+
+    @app.post("/api/results/{result_id}/email")
+    def request_client_email(result_id: int, data: ClientEmailRequest, request: Request, bg: BackgroundTasks):
+        if result_id < 1 or not secure_transport(request):
+            raise HTTPException(403, "A completed result and HTTPS are required")
+        current = load_smtp(managed['smtp'], settings)
+        if not (current.smtp_host and current.smtp_to and current.smtp_from):
+            raise HTTPException(503, "Admin email delivery is not configured")
+        try:
+            record = claim_email(settings.db_path, result_id, data.token, get_ip(request))
+        except EmailClaimError as exc:
+            raise HTTPException(exc.status_code, exc.message)
+        bg.add_task(send_client_result, current, result_id, record)
+        return {"status": "queued", "message": "Your result was queued for the configured administrators"}
 
     @app.get("/api/admin/config/smtp", dependencies=[Depends(require_admin)])
     def get_smtp_config():
@@ -472,7 +566,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             rows = [dict(r) for r in con.execute("SELECT * FROM results ORDER BY id DESC LIMIT 10000")]
         names = ["id", "completed_at", "client_ip", "school", "vlan", "network_label", "agent_id",
                  "download_mbps", "upload_mbps", "latency_ms", "jitter_ms", "packet_loss_pct",
-                 "download_bytes", "upload_bytes", "email_status"]
+                 "download_bytes", "upload_bytes", "email_status", "client_email_status"]
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=names)
         writer.writeheader()
