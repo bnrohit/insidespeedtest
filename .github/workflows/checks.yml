@@ -21,8 +21,9 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt pip-audit bandit
       - run: python -m pytest -q
       - run: node --check app/static/branding.js && node --check app/static/admin.js && node --check app/static/test.js && node tests/client-logo.test.cjs
-      - run: bash -n deploy/mdns-audit.sh deploy/nginx-version-audit.sh deploy/gmcs-safe-upgrade.sh app/static/gmcs-diagnostics-macos.sh && sh -n agent/vyos/install-vyos.sh agent/vyos/runner.sh
+      - run: bash -n deploy/mdns-audit.sh deploy/nginx-version-audit.sh deploy/gmcs-safe-upgrade.sh app/static/gmcs-diagnostics-macos.sh && sh -n agent/vyos/install-vyos.sh agent/vyos/runner.sh integrations/vyos-snmp-direct/install.sh integrations/vyos-snmp-direct/runner.sh
       - run: python -m compileall -q app agent integrations
+      - run: if command -v php >/dev/null; then find integrations/librenms-app -name '*.php' -print0 | xargs -0 -r -n1 php -l; fi
       - run: python -m pip_audit -r requirements.txt
       - run: python -m bandit -r app agent integrations -ll -q
 

@@ -264,3 +264,15 @@ See [`docs/GMCS-SCHOOL-AGENT-HOURLY-LIBRENMS.md`](docs/GMCS-SCHOOL-AGENT-HOURLY-
 ### VyOS routers as active school speed-test agents
 
 Deploy a persistent VyOS on-router hourly HTTPS speed-test agent and attach its measurements to the **existing school VyOS router device** as a LibreNMS service. VyOS/host agents run the test; LibreNMS only reads cached metrics and records performance RRD graphs. See [VyOS school-agent & LibreNMS instructions](docs/GMCS-VYOS-SCHOOL-AGENT-LIBRENMS.md). No modification of the centralized SSH collector.
+
+### Router-local VyOS Ookla + Inside tests → LibreNMS SNMP App (non-destructive pilot)
+
+For the exact **router-run measurements and LibreNMS-owned RRD** architecture, see
+[`docs/GMCS-VYOS-DIRECT-SNMP-LIBRENMS.md`](docs/GMCS-VYOS-DIRECT-SNMP-LIBRENMS.md).
+`integrations/vyos-snmp-direct/` executes the internal HTTPS test and optional Ookla
+**on each VyOS router**, caches sanitized metrics, and exposes them via the VyOS SNMP
+script extension `gmcs_vyos_speedtest`. `integrations/librenms-app/gmcs_vyos_speedtest/`
+adds a standalone LibreNMS application with the old *Ookla / Local-inside* panel labels.
+**The pre-existing custom `vyos_speedtest` app and its RRDs are not modified.**
+A read-only audit on the actual LibreNMS host is needed before reusing its original
+RRDs or claiming previous historical trends are recovered. SNMP polling never runs a test.
