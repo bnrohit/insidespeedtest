@@ -1,9 +1,7 @@
-"""Non-network regression: router measures; SNMP reads sanitized cache; RRD mapping stable."""
+"""VyOS runs GMCS test locally; LibreNMS polls cached measurements without running commands."""
 from __future__ import annotations
-
 import importlib.util
 import json
-import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,97 +11,81 @@ ROOT = Path(__file__).resolve().parents[1] / 'integrations' / 'vyos-snmp-direct'
 
 
 def load(path, name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / path)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    spec=importlib.util.spec_from_file_location(name,ROOT/path)
+    obj=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(obj)
+    return obj
 
 
-def test_validated_and_forbidden_values():
-    m = load('collect.py', 'gmcs_router_collect')
-    cfg = {'inside': {'enabled': True, 'url': 'https://10.250.31.192:18443',
-                      'agent_id': 'CDE-VYOS01',
-                      'token_file': '/config/auth/gmcs-speedtest/token',
-                      'ca_file': '/config/auth/gmcs-speedtest/ca.pem'},
-           'ookla': {'enabled': True, 'binary': '/usr/bin/speedtest'}}
-    assert m.validated(cfg) == cfg
-    for broken in [cfg | {'shell': 'echo test'},
-                   {'inside': dict(cfg['inside'], url='http://10.250.31.192:18443')},
-                   {'inside': dict(cfg['inside'], token_file='/tmp/exposed')},
-                   {'inside': dict(cfg['inside'], url='https://x/?command=bad')},
-                   {'ookla': {'enabled': True, 'binary': '/tmp/custom'}}]:
-        with pytest.raises(ValueError):
-            m.validated(broken)
+def config():
+    return {'inside': {'enabled':True,'url':'https://10.250.31.192:18443',
+                       'agent_id':'CDE-VYOS01',
+                       'token_file':'/config/auth/gmcs-speedtest/token',
+                       'ca_file':'/config/auth/gmcs-speedtest/ca.pem'}}
 
 
-def test_inside_test_launches_on_router_only():
-    m = load('collect.py', 'gmcs_router_collect2')
-    cmd_seen = []
-    def fake(cmd, **kwargs):
-        cmd_seen.extend(cmd)
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            'agent_id': 'CDE-VYOS01', 'download_mbps': 75,
-            'upload_mbps': 46, 'latency_ms': 7.2, 'jitter_ms': 1.1,
-            'packet_loss_pct': 0}))
-    r = m.inside_result({'enabled': True, 'url': 'https://gmcs.test',
-         'agent_id': 'CDE-VYOS01','token_file': '/config/auth/gmcs-speedtest/token'},
-         agent_script=Path('/config/scripts/gmcs-speedtest/school_agent.py'),
-         subprocess_run=fake)
-    assert r['status'] == 'ok' and r['download_mbps'] == 75
-    assert '75' not in cmd_seen and '--url' in cmd_seen
-    assert '/config/scripts/gmcs-speedtest/school_agent.py' in cmd_seen
+def test_configuration_rejects_ookla_plain_http_and_bad_paths():
+    m=load('collect.py','direct_collect_a')
+    c=config();assert m.validated(c)==c
+    invalid=[c|{'ookla':{'enabled':True}},c|{'shell':'id'},
+            {'inside':dict(c['inside'],url='http://10.250.31.192:18443')},
+            {'inside':dict(c['inside'],url='https://x/?command=bad')},
+            {'inside':dict(c['inside'],token_file='/tmp/key')},
+            {'inside':dict(c['inside'],agent_id='CDE;sh')},
+            {'inside':dict(c['inside'],ca_file='/config/auth/gmcs-speedtest/../other')}]
+    for cfg in invalid:
+        with pytest.raises(ValueError):m.validated(cfg)
 
 
-def test_ookla_json_is_bytes_per_second(monkeypatch, tmp_path):
-    m = load('collect.py', 'gmcs_router_collect3')
-    f = tmp_path/'speedtest';f.write_text('#!/bin/sh\n');f.chmod(0o755)
-    def fake(cmd, **kwargs):
-        assert cmd[-1] == '--format=json'
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            'download': {'bandwidth': 12500000}, 'upload': {'bandwidth': 5000000},
-            'ping': {'latency': 12.4, 'jitter': 1.7}, 'packetLoss': 0.2}))
-    result = m.ookla_result({'enabled': True, 'binary': str(f)}, subprocess_run=fake)
-    assert result == {'status':'ok','download_mbps':100.0,'upload_mbps':40.0,
-                      'latency_ms':12.4,'jitter_ms':1.7,'loss_pct':0.2}
-    def no_loss(cmd, **kwargs):
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            'download': {'bandwidth': 12500000}, 'upload': {'bandwidth': 5000000},
-            'ping': {'latency': 12.4, 'jitter': 1.7}}))
-    missing_loss = m.ookla_result({'enabled': True, 'binary': str(f)}, subprocess_run=no_loss)
-    assert missing_loss['status'] == 'ok' and missing_loss['loss_pct'] is None
-    assert m.ookla_result({'enabled':False})['status'] == 'disabled'
-    assert m.ookla_result({'enabled':True,'binary':str(tmp_path/'missing')})['status'] == 'not_installed'
+def test_local_measurement_and_outbound_gmcs_only():
+    m=load('collect.py','direct_collect_b')
+    seen=[]
+    def fake(cmd,**kwargs):
+        seen.extend(cmd)
+        return SimpleNamespace(returncode=0,stdout=json.dumps({'agent_id':'CDE-VYOS01',
+            'download_mbps':46.3,'upload_mbps':25.5,'latency_ms':8.4,
+            'jitter_ms':1.2,'packet_loss_pct':0}))
+    result=m.measure(config()['inside'],script=Path('/config/scripts/gmcs-speedtest/school_agent.py'),run_command=fake)
+    assert result['status']=='ok' and result['download_mbps']==46.3 and result['loss_pct']==0
+    assert '--url' in seen and '--token-file' in seen
+    assert all('ookla' not in str(v).lower() for v in seen)
 
 
-def test_cache_snmp_no_secrets_and_stale(tmp_path):
-    collect = load('collect.py', 'gmcs_router_collect4')
-    extend = load('extend.py', 'gmcs_router_snmp_extend')
-    cache = tmp_path/'latest.json'
-    now = int(time.time())
-    collect.persist(cache, {'version': 1,'at': now,
-        'inside': {'status': 'ok','download_mbps': 120, 'upload_mbps': 65,
-                   'latency_ms': 7,'jitter_ms': 0.1, 'loss_pct':0},
-        'ookla': {'status':'disabled'}})
-    assert cache.stat().st_mode & 0o777 == 0o644
-    raw = extend.render(cache, now=now)
-    data = json.loads(raw)
-    assert data['version'] == 1 and data['error'] == 0
-    assert data['data']['inside']['download_mbps'] == 120
-    assert data['data']['ookla']['download_mbps'] is None
-    assert 'token' not in raw.lower() and '10.250.31' not in raw
-    stale = json.loads(extend.render(cache, now=now+9900))
-    assert stale['data']['inside']['download_mbps'] is None
-    assert stale['data']['inside']['status'] == 'stale'
-    missing = json.loads(extend.render(tmp_path/'missing.json', now=now))
-    assert missing['data']['inside']['status'] == 'missing'
+def test_failed_local_measurement_is_null_not_zero():
+    m=load('collect.py','direct_collect_c')
+    def failed(cmd,**kw):return SimpleNamespace(returncode=1,stdout='',stderr='')
+    assert m.measure(config()['inside'],run_command=failed)=={'status':'failed'}
+    assert m.measure({'enabled':False})=={'status':'disabled'}
 
 
-def test_app_graph_schema_present():
-    lib = Path(__file__).resolve().parents[1]/'integrations'/'librenms-app'/'gmcs_vyos_speedtest'
-    p=(lib/'includes'/'polling'/'applications'/'gmcs_vyos_speedtest.inc.php').read_text()
-    assert "json_app_get($device, $name, 1)" in p
-    for field in ('ookla_down','ookla_up','ookla_ping','ookla_jitter',
-                  'inside_down','inside_up','inside_ping','inside_jitter'):
+def test_snmp_reads_cache_no_network_no_credentials(tmp_path):
+    m=load('collect.py','direct_collect_d')
+    x=load('extend.py','direct_snmp_d')
+    stamp=int(time.time())
+    file=tmp_path/'latest.json'
+    m.persist(file,{'version':1,'at':stamp,'inside':{'status':'ok',
+        'download_mbps':82.2,'upload_mbps':43.3,'latency_ms':5.0,'jitter_ms':1.1,'loss_pct':0}})
+    assert (file.stat().st_mode & 0o777)==0o644
+    out=json.loads(x.render(file,now=stamp))
+    assert out['data']['download_mbps']==82.2
+    assert out['data']['loss_pct']==0
+    assert out['version']==1 and out['error']==0
+    assert 'token' not in json.dumps(out)
+    stale=json.loads(x.render(file,now=stamp+10000))
+    assert stale['data']['status']=='stale'
+    assert all(stale['data'][k] is None for k in x.FIELDS)
+    missing=json.loads(x.render(tmp_path/'missing',now=stamp))
+    assert missing['data']['status']=='missing'
+    assert all(missing['data'][k] is None for k in x.FIELDS)
+
+
+def test_native_app_rrd_schema_and_no_ookla():
+    base=Path(__file__).resolve().parents[1]/'integrations/librenms-app/gmcs_vyos_speedtest'
+    p=(base/'includes/polling/applications/gmcs_vyos_speedtest.inc.php').read_text()
+    assert 'json_app_get($device, $name, 1)' in p
+    for field in ('inside_down','inside_up','inside_ping','inside_jitter','inside_loss'):
         assert field in p
-    for file in ('ookla_bandwidth','ookla_ping','local_bandwidth','local_ping'):
-        assert (lib/'includes'/'html'/'graphs'/'application'/f'gmcs_vyos_speedtest_{file}.inc.php').is_file()
+    assert 'ookla' not in p.lower()
+    for graph in ('local_bandwidth','local_ping','local_loss'):
+        assert (base/f'includes/html/graphs/application/gmcs_vyos_speedtest_{graph}.inc.php').is_file()
+    assert 'Ookla' not in (base/'includes/html/pages/device/apps/gmcs_vyos_speedtest.inc.php').read_text().replace('the existing Ookla application remains untouched.','')

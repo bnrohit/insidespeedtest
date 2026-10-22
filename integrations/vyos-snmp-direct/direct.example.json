@@ -5,9 +5,5 @@
     "agent_id": "EXAMPLE-VYOS01",
     "token_file": "/config/auth/gmcs-speedtest/token",
     "ca_file": "/config/auth/gmcs-speedtest/ca.pem"
-  },
-  "ookla": {
-    "enabled": false,
-    "binary": "/usr/bin/speedtest"
   }
 }

@@ -276,3 +276,8 @@ adds a standalone LibreNMS application with the old *Ookla / Local-inside* panel
 **The pre-existing custom `vyos_speedtest` app and its RRDs are not modified.**
 A read-only audit on the actual LibreNMS host is needed before reusing its original
 RRDs or claiming previous historical trends are recovered. SNMP polling never runs a test.
+
+
+### New: native VyOS HTTP speed-test → LibreNMS Apps (without Ookla)
+
+The VyOS router runs the **GMCS HTTPS transfer test locally**, caches measured Mbps/latency/jitter/loss, and exposes only that cached data via SNMP extend. LibreNMS polls it with existing SNMPv3 credentials and stores charts on that VyOS device under **Apps → GMCS VyOS Speedtest**. No central SSH-test scheduler, no remote LibreNMS polling-triggered speed test, no Ookla. Installation and retention: [`docs/GMCS-VYOS-DIRECT-SNMP-LIBRENMS.md`](docs/GMCS-VYOS-DIRECT-SNMP-LIBRENMS.md).

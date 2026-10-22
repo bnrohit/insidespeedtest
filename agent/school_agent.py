@@ -122,6 +122,7 @@ def run(args):
                       'observed_ip': identity['client_ip'],
                       'download_mbps': down, 'upload_mbps': up,
                       'latency_ms': round(latency, 2), 'jitter_ms': round(jitter, 2),
+                      'packet_loss_pct': report['packet_loss_pct'],
                       'email_notification': ack['email_notification']}))
     return 0
 

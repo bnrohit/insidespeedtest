@@ -1,54 +1,45 @@
-# GMCS — VyOS measures locally; LibreNMS polls VyOS SNMP and owns the RRD graphs
+# GMCS VyOS-native HTTP speed test → LibreNMS Apps/RRD
 
-**This is NOT the central SSH/iperf collector, NOT a LibreNMS polling-triggered speed test, and NOT an update to the NOC server.** The router itself performs the measurement, caches a small nonsecret JSON payload, and exposes it over VyOS's existing SNMP protocol. The central HTTPS `10.250.31.192:18443` VM acts only as the passive inside-test endpoint; it does not run a measurement or retrieve school results.
+**No Ookla, no central SSH/iperf speed-test scheduler, and no LibreNMS-triggered speed test.** Each school VyOS router runs the GMCS HTTPS transfer test itself. Its measured result is cached on that same router. LibreNMS retrieves only that result using the router's existing SNMPv3 management credentials, and writes new RRD datasets under **Apps → GMCS VyOS Speedtest**. The GMCS Debian server (`10.250.31.192:18443`) serves test bytes and accepts the normal authenticated result; it **does not initiate or calculate router-side measurements**.
 
-## Important compatibility with the old app
+A normal Linux machine can use the existing `agent/school_agent.py` scheduler, but to show *this* native LibreNMS Apps entry, the SNMP extend must be hosted on the VyOS router being monitored. This is deliberately separate from existing browser diagnostics, central VM egress tests, and the older VyOS SSH test collector.
 
-The GMCS LibreNMS screenshots show an **existing custom** `Vyos Speedtest` application (device 7613, router `10.7.8.10`), headings **Ookla - Bandwidth**, **Ookla - Ping**, **Local - inside - Bandwidth**, and `-nan` for missing datasets. We do **not** possess its custom PHP poller, SNMP extension schema, or previous RRD definitions. Therefore, this pilot installs a **separate** `gmcs_vyos_speedtest` application with equivalent graphs; **it does NOT overwrite** `vyos_speedtest`, modify its RRDs or make historical numbers appear. A lossless continuation of *exactly* the old graphs requires inspecting the old PHP+RRD schema on LibreNMS first.
+## 1. Enroll one school VyOS router, then install the agent code
 
-### Supported paths
+In [GMCS Admin](https://10.250.31.192:18443/admin) → **Scheduled Linux school servers**, register a unique ID like `CDE-VYOS01` with the router's **actual source IP `/32` as observed by the GMCS server**. Securely transfer its token to the router; do not paste it into chat, terminal logs or public GitHub.
 
-1. **Ookla → public Internet:** Optional pre-installed official Ookla `speedtest --format=json`. This is an uncapped external service and can saturate a school WAN. Do not schedule hourly without appropriate capacity/off-hours policy. Binary or EULA is **not installed or accepted automatically**; if unavailable, output is `null`/`not_installed`, not zero.
-2. **Local - inside:** VyOS runs `school_agent.py` *locally*, initiating small HTTPS downloads/uploads against the GMCS server, and writes its own observed Mbps, latency, jitter and loss. An individual authorized router credential and source IP `/32` must be enrolled in the GMCS Admin UI. The server's role is to respond to HTTP(S) requests, not to measure; it may also keep a copy of the result for normal GMCS reporting. The measured endpoint is the VM **not** a separate `iperf3` target, and the output is not ISP line-rate speed.
-3. **LibreNMS SNMP poller:** 5-minute polls call `NET-SNMP-EXTEND-MIB::nsExtendOutputFull."gmcs_vyos_speedtest"` on the VyOS router. The extend script only reads the cached JSON and has **no credentials or shell/net access**. Custom LibreNMS application PHP writes 10 GAUGE datasets to that **router device's** LibreNMS RRDs, with normal day/week/month/year graph controls.
+On a management Linux workstation with this GitHub repository checked out:
 
-## A. VyOS installation (one authorized test router; no automatic changes to VyOS configuration)
-
-Stage this directory and `agent/school_agent.py` on the router. From a management workstation, after cloning/updating `bnrohit/insidespeedtest`:
-
-```bash
-scp -r integrations/vyos-snmp-direct nwadmin@YOUR_VERIFIED_VYOS_IP:/tmp/gmcs-vyos-snmp-direct
-scp agent/school_agent.py nwadmin@YOUR_VERIFIED_VYOS_IP:/tmp/gmcs-school-agent.py
+```sh
+scp -r integrations/vyos-snmp-direct nwadmin@VERIFIED_ROUTER_IP:/tmp/gmcs-vyos-snmp-direct
+scp agent/school_agent.py nwadmin@VERIFIED_ROUTER_IP:/tmp/gmcs-school-agent.py
 ```
 
-On the actual school VyOS router:
+On the router:
 
-```bash
+```sh
 sudo sh /tmp/gmcs-vyos-snmp-direct/install.sh
 sudo install -m 0755 /tmp/gmcs-school-agent.py /config/scripts/gmcs-speedtest/school_agent.py
 sudo vi /config/auth/gmcs-speedtest/direct.json
 ```
 
-Set `inside.enabled` to `true` ONLY after registering the router in GMCS Admin > Scheduled Linux school servers with a distinct agent ID and verified source `/32`; create `/config/auth/gmcs-speedtest/token` (0600, root-owned) by your approved secret-transfer method. Configure an approved district CA file and verify the certificate covers the name/IP in `inside.url`. No insecure HTTP fallback or `curl -k` is used for authenticated testing. If the code or certificate is wrong, an explicit error status appears.
+Set `inside.enabled` to `true`, set `inside.url` to `https://10.250.31.192:18443` if the HTTPS certificate is trusted and has that address in its subjectAltName, and replace the example agent ID with the enrolled router ID. Keep token and CA cert under `/config/auth/gmcs-speedtest/`. Token permissions must be `0600` root. No insecure HTTP fallback is supported when credentials are present; issue a correct GMCS district-trusted certificate instead of disabling TLS validation.
 
-For Internet measurement, first install and license the **official compatible Ookla binary through your change-management process** and verify it works in shell, then set `ookla.enabled=true`. Keep disabled at first if school links are limited; tests can heavily impact real users.
+Run the test *on VyOS* once:
 
-Check and run once BEFORE enabling any hourly task:
-
-```bash
+```sh
 sudo python3 /config/scripts/gmcs-vyos-speedtest/collect.py --validate-only
 sudo /config/scripts/gmcs-vyos-speedtest/runner.sh
-sudo cat /config/user-data/gmcs-vyos-speedtest/latest.json
 sudo /config/user-data/gmcs-vyos-speedtest/extend.py
 ```
 
-The cached file has no admin passwords, bearer keys, arbitrary command output or hostname. It is regenerated atomically by each scheduled test. Reports older than 150 minutes are exposed with `null` measurements so stale values aren't mistaken for current measurements.
+The first execution sends a bounded **24 MiB download / 8 MiB upload** to the GMCS HTTPS service, measures speeds/ping/jitter/loss *from the router*, and saves only safe numeric metrics. The SNMP extension **only reads cache**; it never runs a test. If the test fails or its cache becomes older than 150 minutes, the extend produces NULL measurements, not invented zero speeds.
 
-Only after the first successful local measurement, enter VyOS config mode:
+When a pilot router returns valid numbers, configure the SNMP extension and independent hourly VyOS scheduler (choose staggered minutes for each school, **do not enable two different speed-test tasks on the same router**):
 
 ```text
 configure
-set service snmp script-extensions extension-name gmcs_vyos_speedtest script '/config/user-data/gmcs-vyos-speedtest/extend.py'
+set service snmp script-extensions extension-name gmcs_vyos_speedtest script /config/user-data/gmcs-vyos-speedtest/extend.py
 set system task-scheduler task gmcs-vyos-direct crontab-spec '23 * * * *'
 set system task-scheduler task gmcs-vyos-direct executable path '/config/scripts/gmcs-vyos-speedtest/runner.sh'
 commit
@@ -56,58 +47,48 @@ save
 exit
 ```
 
-**Change the minute per router** and prevent duplicate scheduled tests from the prior `gmcs-speedtest` VyOS task or the optional NOC SSH collector. Never schedule the speed-test command as the SNMP extend: LibreNMS polls frequently, and doing so would overload school WAN. VyOS officially documents the persistent `service snmp script-extensions` configuration: https://docs.vyos.io/en/1.4/configuration/service/snmp.html
+If the old `gmcs-speedtest` VyOS task was previously enabled on this same router, review it and disable it before enabling the new scheduler to avoid duplicate hourly runs; leave unrelated tasks untouched. Keep the router SNMPv3 monitoring configuration and LibreNMS allowlists exactly as they already are. VyOS SNMP extend syntax is documented at https://docs.vyos.io/en/1.4/configuration/service/snmp.html.
 
-Confirm the SNMP agent's OS account can traverse `/config/user-data` and execute the extend; on some systems shell ACLs or ownership require adjustment. Test from the actual LibreNMS poller over your existing restricted SNMPv3/allowlisted management path. Do not add a public v2c community.
+## 2. Verify SNMP from LibreNMS, without triggering a speed test
 
-```bash
-# On LibreNMS, with your existing authenticated SNMP options (do not paste secrets):
-snmpget [YOUR_EXISTING_SNMPv3_OPTIONS] YOUR_VERIFIED_VYOS_IP \
+The poller should use the existing router SNMPv3 auth/priv profile and view permissions:
+
+```sh
+snmpget YOUR_APPROVED_SNMPv3_OPTIONS VERIFIED_ROUTER_IP \
   'NET-SNMP-EXTEND-MIB::nsExtendOutputFull."gmcs_vyos_speedtest"'
 ```
 
-## B. New non-destructive LibreNMS application
+Look for the JSON `version`, `error`, `data.status`, `data.download_mbps`, `data.upload_mbps`, `data.latency_ms`, `data.jitter_ms`, and `data.loss_pct`. SNMP only exposes the cached, nonsensitive numeric readings—no agent credentials, hostnames, router IPs or private commands. Make sure the SNMP daemon account can traverse `/config/user-data` and read `latest.json` (0644). Do not expose SNMP beyond management networks or add a new public community.
 
-From the GitHub checkout, copy only the **new** files from `integrations/librenms-app/gmcs_vyos_speedtest/` to the corresponding relative paths under `/opt/librenms/`. Review paths and backup the LibreNMS host before writing; do not overwrite any existing file. Example:
+## 3. Install the NEW native LibreNMS application, without touching old graphs
 
-```bash
-cd /path/to/insidespeedtest
+The three graph panels appear under the existing VyOS device's **Apps** tab. This requires installing a *new* LibreNMS poller, page and 3 graph definitions on the LibreNMS host—not just registering the device by SNMP. The new module deliberately uses `gmcs_vyos_speedtest` to avoid replacing your older `vyos_speedtest` RRDs.
+
+From a checked-out repository on LibreNMS (check your LibreNMS root instead of assuming `/opt/librenms`):
+
+```sh
 SRC=integrations/librenms-app/gmcs_vyos_speedtest
-# Confirm this is a NEW app; abort if it already exists:
-test ! -e /opt/librenms/includes/polling/applications/gmcs_vyos_speedtest.inc.php || exit 1
-sudo cp -vn "$SRC/includes/polling/applications/gmcs_vyos_speedtest.inc.php" \
-  /opt/librenms/includes/polling/applications/
-sudo cp -vn "$SRC/includes/html/pages/device/apps/gmcs_vyos_speedtest.inc.php" \
-  /opt/librenms/includes/html/pages/device/apps/
-sudo cp -vn "$SRC/includes/html/graphs/application/gmcs_vyos_speedtest_"*.inc.php \
-  /opt/librenms/includes/html/graphs/application/
+sudo test ! -e /opt/librenms/includes/polling/applications/gmcs_vyos_speedtest.inc.php || exit 1
+sudo install -m 0644 "$SRC/includes/polling/applications/gmcs_vyos_speedtest.inc.php" /opt/librenms/includes/polling/applications/
+sudo install -m 0644 "$SRC/includes/html/pages/device/apps/gmcs_vyos_speedtest.inc.php" /opt/librenms/includes/html/pages/device/apps/
+sudo install -m 0644 "$SRC/includes/html/graphs/application/gmcs_vyos_speedtest_local_bandwidth.inc.php" /opt/librenms/includes/html/graphs/application/
+sudo install -m 0644 "$SRC/includes/html/graphs/application/gmcs_vyos_speedtest_local_ping.inc.php" /opt/librenms/includes/html/graphs/application/
+sudo install -m 0644 "$SRC/includes/html/graphs/application/gmcs_vyos_speedtest_local_loss.inc.php" /opt/librenms/includes/html/graphs/application/
 ```
 
-Validate all six PHP files with `php -l`. On LibreNMS, confirm Applications discovery and polling modules are enabled for the existing VyOS device. Then run discovery and polling **for that router only**, using your local LibreNMS CLI version (`./lnms device:discover` and `./lnms device:poll` or `./discovery.php -h` and `./poller.php -h`). Check LibreNMS's `Apps` tab for **GMCS VyOS Speedtest**. This app discovers the SNMP extend `gmcs_vyos_speedtest` and writes RRD GAUGE datasets: `ookla_down`, `ookla_up`, `ookla_ping`, `ookla_jitter`, `ookla_loss`, `inside_down`, `inside_up`, `inside_ping`, `inside_jitter`, `inside_loss`. It shows four panels matching the old headings, with a separate local ping panel.
+Validate all new `.inc.php` files with `php -l`. Ensure Applications discovery/polling is enabled on this router, then discover and poll that single device using the commands appropriate to your LibreNMS installation, e.g. `sudo -u librenms ./lnms device:discover 10.7.8.10` and `sudo -u librenms ./lnms device:poll 10.7.8.10` when run inside LibreNMS root (use actual device hostname/ID). An existing router device such as 7613 / `10.7.8.10` is **not proof** that the correct agent is enrolled or installed on it.
 
-Do not modify LibreNMS's core global discovery script. The existing `vyos_speedtest` application and RRDs remain untouched. If you need its *same* historical files, capture the old source using the non-mutating steps in section C and map the existing dataset names before an explicit cutover.
+Inspect **Apps → GMCS VyOS Speedtest** on the chosen device: download/upload Mbps, latency/jitter and packet-loss charts, with native LibreNMS day/week/month/year ranges. Missing cache or stale tests show gaps rather than false 0 Mbps. LibreNMS docs on SNMP-extend applications: https://docs.librenms.org/Extensions/Applications/.
 
-## C. Read-only old-application audit (preserve 2-year history)
+## 4. Retention and historical graphs
 
-On your LibreNMS host, run without modifying anything:
+RRDs only accumulate observations **from the date this new application first starts polling**. Historical Ookla graphs are not copied, modified or reused. For two-year graph views, inspect the **actual RRD archives** (`rrdtool info ...`) and change archive configuration through LibreNMS administration if they do not cover at least 732 days. Do not assume that hourly resolution will be retained for two years: older data may be consolidated.
 
-```bash
-sudo find /opt/librenms/includes/polling/applications \
-  /opt/librenms/includes/html/pages/device/apps \
-  /opt/librenms/includes/html/graphs/application -maxdepth 1 \
-  -type f -iname '*vyos*speed*' -print
-sudo find /opt/librenms/rrd -type f -iname '*vyos*speed*.rrd' -print | head -40
-```
+## 5. Troubleshooting
 
-The file names, poller code (after checking it contains no credentials), and `rrdtool info` **dataset names** allow an exact compatibility adapter instead of writing a new history. A graph marked `-nan` may be due to a missing SNMP extension, failed command, schema mismatch, stale RRD, or absent data: the screenshot alone cannot establish which one.
-
-LibreNMS RRD archives commonly consolidate older data. Verify actual 2-year retention on this installation before claiming 2-year hourly-resolution history. Preserve backups and old RRD files.
-
-## D. Troubleshooting and safeguards
-
-- Local test missing => check `sudo /config/scripts/gmcs-vyos-speedtest/runner.sh`, private token, observed source-IP match, router CA certificate, VyOS outbound route/DNS and the GMCS service health.
-- Ookla missing => explicitly check installation/license and configured `ookla.enabled`, and ensure firewall policy permits its normal external endpoints.
-- SNMP empty => check VyOS `service snmp script-extensions` commit/save, restricted SNMPv3 view, `nsExtendOutputFull`, OS permissions to cache, and read-only execution of `extend.py`.
-- LibreNMS app not detected => ensure its PHP poller file exists, applications module enabled, extension name matches `gmcs_vyos_speedtest`, and discovery/poller runs for the device.
-- All-missing data are written as NULL (not zero), and stale tests older than 150 minutes are masked.
-- Keep sample caps small on school WAN; external Ookla has **no enforced cap** in our wrapper. No HTTP tests to arbitrary hosts and no installation of unknown binaries.
+- `disabled`: set `inside.enabled=true` after agent enrollment.
+- `failed`: debug the router's CA trust, DNS, route, source NAT, agent token and the GMCS server's HTTPS port 18443. Only the router's local runner starts tests.
+- `stale`: no successful *recent* scheduled run; inspect VyOS task scheduler and run the agent manually.
+- Missing SNMP output: verify the VyOS extension is committed/saved, SNMPv3 view, execute permission and cache traversal as the SNMP runtime account.
+- No **Apps** entry: verify LibreNMS PHP poller path, enable applications discovery and run discovery/polling on exactly this VyOS device.
+- Blank RRD: first confirm a fresh local test and SNMP output, then validate the LibreNMS application poller and datapoint DS names (`inside_down`, `inside_up`, `inside_ping`, `inside_jitter`, `inside_loss`).

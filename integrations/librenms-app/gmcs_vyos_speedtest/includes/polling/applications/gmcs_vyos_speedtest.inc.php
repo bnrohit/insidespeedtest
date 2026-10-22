@@ -1,7 +1,5 @@
 <?php
-
-// GMCS: VyOS measures locally; this poller only reads the router's cached SNMP extend.
-// Separate app name avoids overwriting pre-existing local vyos_speedtest or RRDs.
+// GMCS VyOS *local* speed test. Reads cached SNMP extend, never initiates tests.
 use Illuminate\Support\Facades\Log;
 use LibreNMS\Exceptions\JsonAppException;
 use LibreNMS\RRD\RrdDefinition;
@@ -14,42 +12,24 @@ try {
     update_application($app, $e->getCode() . ': ' . $e->getMessage(), []);
     return;
 }
-
-$rrd_def = RrdDefinition::make();
-$mapping = [
-    'ookla' => [
-        'download_mbps' => 'ookla_down',
-        'upload_mbps' => 'ookla_up',
-        'latency_ms' => 'ookla_ping',
-        'jitter_ms' => 'ookla_jitter',
-        'loss_pct' => 'ookla_loss',
-    ],
-    'inside' => [
-        'download_mbps' => 'inside_down',
-        'upload_mbps' => 'inside_up',
-        'latency_ms' => 'inside_ping',
-        'jitter_ms' => 'inside_jitter',
-        'loss_pct' => 'inside_loss',
-    ],
+$def=RrdDefinition::make();
+$mapping=[
+    'download_mbps'=>'inside_down',
+    'upload_mbps'=>'inside_up',
+    'latency_ms'=>'inside_ping',
+    'jitter_ms'=>'inside_jitter',
+    'loss_pct'=>'inside_loss',
 ];
-$fields = [];
-foreach ($mapping as $source => $values) {
-    $sample = $report[$source] ?? [];
-    $ok = ($sample['status'] ?? '') === 'ok';
-    foreach ($values as $incoming => $ds) {
-        $value = $sample[$incoming] ?? null;
-        $maximum = ($incoming === 'loss_pct' ? 100 : 100000);
-        $fields[$ds] = ($ok && is_numeric($value) && is_finite((float)$value)
-            && $value >= 0 && $value <= $maximum) ? (float)$value : null;
-        $rrd_def->addDataset($ds, 'GAUGE', 0, $maximum);
-    }
+$fields=[];
+$ok=($report['status'] ?? '') === 'ok';
+foreach ($mapping as $field => $ds) {
+    $value=$report[$field] ?? null;
+    $max=($field==='loss_pct') ? 100 : 100000;
+    $fields[$ds]=($ok && is_numeric($value) && is_finite((float) $value)
+       && (float) $value>=0 && (float) $value<=$max) ? (float) $value : null;
+    $def->addDataset($ds,'GAUGE',0,$max);
 }
-
-$tags = [
-    'name' => $name,
-    'app_id' => $app->app_id,
-    'rrd_name' => ['app', $name, $app->app_id],
-    'rrd_def' => $rrd_def,
-];
-app('Datastore')->put($device, 'app', $tags, $fields);
-update_application($app, 'OK (cached router measurements)', $fields);
+$tags=['name'=>$name,'app_id'=>$app->app_id,
+       'rrd_name'=>['app',$name,$app->app_id],'rrd_def'=>$def];
+app('Datastore')->put($device,'app',$tags,$fields);
+update_application($app,$ok ? 'OK (VyOS local HTTP test)' : 'No fresh VyOS result', $fields);
