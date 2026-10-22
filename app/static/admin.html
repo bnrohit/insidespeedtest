@@ -23,7 +23,7 @@
 </section>
 <section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
 <section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
-<div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th></tr></thead><tbody id="rows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
+<div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th><th>DIAGNOSTICS</th></tr></thead><tbody id="rows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
 <div class="caption" id="admin-status"></div></section>
 <section class="panel table-panel"><h2>School averages</h2><div class="table-scroll"><table><thead><tr><th>SCHOOL</th><th>TESTS</th><th>AVG DOWNLOAD</th><th>AVG UPLOAD</th></tr></thead><tbody id="schools"></tbody></table></div></section>
 <section class="panel table-panel config-area" id="config-area">
@@ -76,6 +76,17 @@
   <div id="agent-secret-box" class="agent-secret-box" hidden><strong>Copy now — this token is shown only once.</strong><textarea id="agent-secret" rows="3" readonly></textarea><button id="copy-agent" class="secondary-btn" type="button">Copy token</button></div>
   <div id="agents-status" class="caption" role="status"></div>
   <div class="table-scroll"><table><thead><tr><th>SERVER</th><th>AUTHORIZED IP</th><th>ACTION</th></tr></thead><tbody id="agents-list"></tbody></table></div>
+</section>
+<section class="panel" id="diagnostics-panel" aria-label="Client troubleshooting and interpretation">
+  <h2>Client troubleshooting center</h2>
+  <p>Choose a completed result ID to review browser observations, uploaded Windows/macOS diagnostics and possible problem areas. Native data is only available when the client explicitly reviews and uploads a report.</p>
+  <div class="actions"><label>Result ID <input id="diag-result-id" type="number" min="1" max="999999999" placeholder="e.g. 123"></label><button id="diag-open" class="secondary-btn" type="button">Analyze result</button></div>
+  <p id="diag-status" class="caption" role="status">Select a row's Diagnose button or enter a result ID.</p>
+  <div id="diag-summary" class="diag-report" hidden>
+    <h3>Evidence &amp; suggested next checks</h3><div id="diag-context"></div><div id="diag-findings"></div>
+    <h3>Browser/network context</h3><pre id="diag-browser" class="diag-output"></pre>
+    <details><summary>Reviewed client command output (sensitive network details)</summary><div id="diag-native"></div></details>
+  </div>
 </section>
 <footer>Measurements are client reported, subject to client, VM, browser, and path limitations. Unknown VLAN means no exact mapping exists.</footer>
 </main><script src="/static/admin.js" defer></script></body></html>

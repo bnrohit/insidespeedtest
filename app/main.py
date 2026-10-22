@@ -28,6 +28,7 @@ from .client_email import claim_email, EmailClaimError
 from .branding_config import (DEFAULT_BRAND, init_branding, read_branding, write_branding,
                               read_logo, store_logo, clear_logo)
 from .external_diag import init_external, history as egress_history, run_external
+from .diagnostics import init_diagnostics, record_browser, submit_advanced, fetch_report, validate_advanced
 from .identity import IdentityMatcher
 from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
                          smtp_public_config, save_smtp, put_mappings, list_agents,
@@ -135,6 +136,24 @@ class BrandingLogo(BaseModel):
     png_data: str = Field(min_length=100, max_length=650000)
 
 
+class BrowserDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    platform: str = Field(default="Unknown", max_length=45)
+    browser: str = Field(default="Unknown", max_length=35)
+    network_type: str = Field(default="Unknown", max_length=20)
+    network_estimated_rtt_ms: int | None = Field(default=None, ge=0, le=100000)
+    online: bool | None = None
+    https_rtt_ms: float | None = Field(default=None, ge=0, le=30000, allow_inf_nan=False)
+
+
+class AdvancedDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=30, max_length=150)
+    platform: str = Field(min_length=1, max_length=32)
+    hostname: str = Field(default="", max_length=100)
+    commands: dict[str, str]
+
+
 class Report(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=30, max_length=150)
@@ -145,6 +164,7 @@ class Report(BaseModel):
     packet_loss_pct: float = Field(ge=0, le=100, allow_inf_nan=False)
     download_bytes: int = Field(ge=1, le=100_000_000_000)
     upload_bytes: int = Field(ge=1, le=100_000_000_000)
+    browser_diagnostics: BrowserDiagnostic | None = None
 
 
 def parse_cidrs(value: str):
@@ -206,6 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     init_db(settings.db_path)
     init_branding(settings.db_path)
     init_external(settings.db_path)
+    init_diagnostics(settings.db_path)
     managed = setup_managed(settings.db_path, settings.mapping_path, settings.agents_path)
     mapping = IdentityMatcher.from_csv(managed['mappings'])
     agents = Agents(str(managed['agents']))
@@ -487,12 +508,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/results")
     def result(request: Request, data: Report, bg: BackgroundTasks):
         ip = get_ip(request)
-        record = {**data.model_dump(exclude={"token"}), "client_ip": ip, **app.state.mapping.lookup(ip)}
+        record = {**data.model_dump(exclude={"token", "browser_diagnostics"}), "client_ip": ip, **app.state.mapping.lookup(ip)}
         hashed = hashlib.sha256(data.token.encode()).hexdigest()
         saved = save_result(settings.db_path, hashed, ip, record)
         if saved is None:
             raise HTTPException(400, "Invalid, expired, already used, or inconsistent test session")
         result_id, agent_id = saved
+        # Browser metadata is bounded and does not include MAC, hostname or
+        # hardware identifiers. Native diagnostics need separate user consent.
+        record_browser(settings.db_path, result_id, data.token, ip,
+                       data.browser_diagnostics.model_dump(exclude_none=True)
+                       if data.browser_diagnostics and not agent_id else {})
         record["agent_id"] = agent_id
         mail_settings = load_smtp(managed['smtp'], settings)
         should_email = mail_settings.email_agent_results if agent_id else mail_settings.email_browser_results
@@ -525,6 +551,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(exc.status_code, exc.message)
         bg.add_task(send_client_result, current, result_id, record)
         return {"status": "queued", "message": "Your result was queued for the configured administrators"}
+
+    @app.post('/api/results/{result_id}/diagnostics/advanced')
+    def upload_client_diagnostics(result_id: int, data: AdvancedDiagnostics, request: Request):
+        if result_id < 1 or not secure_transport(request):
+            raise HTTPException(403, 'HTTPS and a completed speed test are required')
+        report = data.model_dump(exclude={'token'})
+        try:
+            validate_advanced(report)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        if not submit_advanced(settings.db_path, result_id, data.token, get_ip(request), report):
+            raise HTTPException(403, 'Report expired, already submitted, or not your test')
+        return {'status':'saved','message':'Reviewed diagnostics attached to this result for GMCS administrators'}
+
+    @app.get('/api/admin/results/{result_id}/diagnostics', dependencies=[Depends(require_admin)])
+    def admin_result_diagnostics(result_id: int):
+        if result_id < 1:
+            raise HTTPException(404, 'Unknown result')
+        report = fetch_report(settings.db_path, result_id)
+        if report is None:
+            raise HTTPException(404, 'Unknown result')
+        return report
 
     @app.get("/api/admin/config/smtp", dependencies=[Depends(require_admin)])
     def get_smtp_config():

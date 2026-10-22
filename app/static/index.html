@@ -18,5 +18,15 @@
   <p class="result-message" id="result-message" role="status"></p>
   <div id="send-email-panel" hidden><button type="button" id="send-email" class="secondary-btn">Email my results to GMCS admins</button>
   <p class="caption" id="send-email-status" role="status">Results go only to the GMCS admin recipients configured on this server.</p></div></section>
-  <footer><div>Only for authorized GMCS network users. School/VLAN labels depend on maintained IP mappings.</div><div>Internal Mbps measure throughput <strong>to this GMCS VM</strong>. The external provider tests your browser separately; results are not automatically combined.</div></footer>
+  <section class="panel" id="client-diagnostics-panel" aria-label="Optional advanced device troubleshooting">
+  <h2>Optional device troubleshooting</h2>
+  <p>A completed speed test automatically records limited browser/network measurements for GMCS troubleshooting. For deeper local details—hostname, adapters, MAC addresses, DNS, route, ping, traceroute, ARP and listening ports—download and run the appropriate <strong>read-only</strong> script on your own device.</p>
+  <p>Review the generated JSON locally. The site cannot and does not run system commands remotely. Do not upload private or personal system information unless authorized by your organization.</p>
+  <div class="actions"><a class="secondary-btn" href="/static/gmcs-diagnostics-windows.ps1" download>Download Windows PowerShell diagnostics</a><a class="secondary-btn" href="/static/gmcs-diagnostics-macos.sh" download>Download macOS diagnostics</a></div>
+  <div class="form-grid"><label>Choose your reviewed JSON report<input type="file" id="diagnostic-file" accept="application/json,.json"></label><label class="checkbox-label"><input id="diagnostic-consent" type="checkbox"> I reviewed this report and authorize sending the included device/network details to GMCS IT.</label></div>
+  <button type="button" class="secondary-btn" id="diagnostic-send" disabled>Attach report to my latest speed test</button>
+  <p id="diagnostic-status" class="caption" role="status">Finish a speed test to enable reporting. Optional advanced data is never collected automatically.</p>
+  <div id="diagnostic-assessment" class="caption" aria-live="polite"></div>
+</section>
+<footer><div>Only for authorized GMCS network users. School/VLAN labels depend on maintained IP mappings.</div><div>Internal Mbps measure throughput <strong>to this GMCS VM</strong>. The external provider tests your browser separately; results are not automatically combined.</div></footer>
 </main><script src="/static/branding.js" defer></script><script src="/static/test.js" defer></script></body></html>

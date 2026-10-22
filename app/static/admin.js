@@ -22,7 +22,11 @@ async function refresh(){
       cell(tr,r.vlan);cell(tr,r.agent_id || 'Browser');cell(tr,r.client_ip);cell(tr,Number(r.download_mbps).toFixed(1)+' Mbps');
       cell(tr,Number(r.upload_mbps).toFixed(1)+' Mbps');
       cell(tr,Number(r.latency_ms).toFixed(1)+' ms');cell(tr,Number(r.jitter_ms).toFixed(1)+' ms');
-      cell(tr,r.email_status);cell(tr,r.client_email_status);el('rows').append(tr);
+      cell(tr,r.email_status);cell(tr,r.client_email_status);
+      const detail=document.createElement('td');const open=document.createElement('button');
+      open.type='button';open.className='secondary-btn';open.textContent='Diagnose #'+r.id;
+      open.addEventListener('click',()=>openDiagnostics(r.id));detail.append(open);tr.append(detail);
+      el('rows').append(tr);
     }
     el('schools').replaceChildren();
     for(const r of summary.schools){const tr=document.createElement('tr');cell(tr,r.school);cell(tr,r.tests);cell(tr,r.avg_down+' Mbps');cell(tr,r.avg_up+' Mbps');el('schools').append(tr);}
@@ -249,3 +253,41 @@ el('logout').addEventListener('click',async()=>{
   }
 });
 initializeAdmin();
+
+async function openDiagnostics(id){
+  el('diag-result-id').value=String(id);
+  el('diag-status').textContent='Loading result #'+id+'…';el('diag-summary').hidden=true;
+  try{
+    const r=await req('/api/admin/results/'+encodeURIComponent(id)+'/diagnostics');
+    el('diag-summary').hidden=false;
+    el('diag-context').textContent=`Result #${r.id} • ${r.school} VLAN ${r.vlan} • ${r.client_ip} • ${r.agent_id||'Browser'} • ${r.download_mbps} Mbps down / ${r.upload_mbps} Mbps up`;
+    el('diag-findings').replaceChildren();
+    for(const finding of r.assessment){
+      const box=document.createElement('div');box.className='diag-finding';
+      const title=document.createElement('strong');title.textContent=finding.severity.toUpperCase()+': '+finding.area;
+      const note=document.createElement('p');note.textContent=finding.observation;
+      const next=document.createElement('p');next.textContent='Next check: '+finding.next_step;
+      box.append(title,note,next);el('diag-findings').append(box);
+    }
+    el('diag-browser').textContent=JSON.stringify(r.browser,null,2);
+    el('diag-native').replaceChildren();
+    if(!r.advanced){el('diag-native').textContent='No advanced client report uploaded. Browser sandbox cannot run ipconfig, ping, netstat, ARP or read MAC addresses.';}
+    else {
+      const line=document.createElement('p');line.textContent=`User-approved ${r.advanced.platform} report from ${r.advanced.hostname||'unnamed client'} uploaded at ${new Date(r.advanced_at*1000).toISOString()}`;
+      el('diag-native').append(line);
+      for(const [name,output] of Object.entries(r.advanced.commands)){
+        const section=document.createElement('details');section.className='diag-native';
+        const summary=document.createElement('summary');summary.textContent=name;
+        const pre=document.createElement('pre');pre.className='diag-output';pre.textContent=output;
+        section.append(summary,pre);el('diag-native').append(section);
+      }
+    }
+    el('diag-status').textContent='Evidence and possible causes loaded. Treat suggestions as hypotheses until verified on VyOS/Nexus and client.';
+    el('diagnostics-panel').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){el('diag-status').textContent='Could not open diagnostics: '+e.message;}
+}
+el('diag-open').addEventListener('click',()=>{
+  const id=Number(el('diag-result-id').value);
+  if(!Number.isSafeInteger(id)||id<1){el('diag-status').textContent='Enter a valid result number.';return;}
+  openDiagnostics(id);
+});

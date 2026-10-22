@@ -3,6 +3,7 @@ const el = (id) => document.getElementById(id);
 const start = el('start');
 let running = false;
 let emailReceipt = null;
+let diagnosticReceipt = null;
 let latestMbps = 0;
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
 const fmt = n => Number(n).toFixed(1);
@@ -101,7 +102,9 @@ async function throughput(mode,seconds,streams,onValue,token) {
 start.addEventListener('click',async()=>{
   if(running)return;
   running=true;start.disabled=true;
-  emailReceipt=null;el('send-email-panel').hidden=true;
+  emailReceipt=null;diagnosticReceipt=null;el('send-email-panel').hidden=true;
+  el('diagnostic-send').disabled=true;
+  el('diagnostic-status').textContent='Finish a speed test to enable optional diagnostics upload.';
   el('result-message').textContent='';el('download').textContent='—';el('upload').textContent='—';
   el('latency').textContent='—';el('jitter').textContent='—';el('live-value').textContent='0.0';
   try {
@@ -132,7 +135,21 @@ start.addEventListener('click',async()=>{
       el('live-value').textContent=fmt(mbps);el('upload').textContent=fmt(mbps);
       updateProgress(58+pct*40,'Testing upload to GMCS server…','UPLOAD');
     },session.token);
-    const answer=await jsonApi('/api/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:session.token,download_mbps:down.mbps,upload_mbps:up.mbps,download_bytes:down.bytes,upload_bytes:up.bytes,...ping})});
+    // Browser APIs do NOT expose NIC MAC, hostname, local routes or command output.
+    // Only coarse OS/browser and best-effort network estimates accompany the test.
+    const ua=navigator.userAgent||'';
+    const browser=ua.includes('Firefox')?'Firefox':ua.includes('Edg/')?'Edge':ua.includes('Chrome')?'Chrome':ua.includes('Safari')?'Safari':'Other';
+    const platform=(navigator.userAgentData?.platform||navigator.platform||'Unknown').slice(0,45);
+    const network=navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    let httpsRtt=null;
+    try{const started=performance.now();const r=await fetch('/api/identity',{cache:'no-store'});if(r.ok)httpsRtt=performance.now()-started;}catch(_){/* best effort */}
+    const browserDiag={platform,browser,network_type:String(network?.effectiveType||'Unknown').slice(0,20),
+      network_estimated_rtt_ms:Number.isInteger(network?.rtt)?Math.min(network.rtt,100000):null,
+      online:navigator.onLine===true,https_rtt_ms:httpsRtt===null?null:Math.min(30000,httpsRtt)};
+    const answer=await jsonApi('/api/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:session.token,download_mbps:down.mbps,upload_mbps:up.mbps,download_bytes:down.bytes,upload_bytes:up.bytes,...ping,browser_diagnostics:browserDiag})});
+    diagnosticReceipt={resultId:answer.result_id,token:session.token};
+    el('diagnostic-send').disabled=false;
+    el('diagnostic-status').textContent='Result #'+answer.result_id+' ready. Optional: review your locally generated JSON before uploading. Sensitive sections require explicit consent.';
     updateProgress(100,'Completed • Result #' + answer.result_id,'COMPLETE');
     el('result-message').textContent=`Recorded for ${answer.school}, VLAN ${answer.vlan}. Automatic notification: ${answer.email_notification}.`;
     if(answer.client_email_available){
@@ -171,4 +188,27 @@ el('send-email').addEventListener('click',async()=>{
     el('send-email-status').textContent='Email request was not accepted: '+err.message;
     if(![409,429].includes(Number((err.message.match(/HTTP (\d+)/)||[])[1])))button.disabled=false;
   }
+});
+
+// Explicit local diagnostics upload; never runs commands or reads files automatically.
+el('diagnostic-send').addEventListener('click',async()=>{
+  const file=el('diagnostic-file').files?.[0];
+  if(!diagnosticReceipt){el('diagnostic-status').textContent='Run a speed test first.';return;}
+  if(!el('diagnostic-consent').checked){el('diagnostic-status').textContent='Review your report and check the consent box.';return;}
+  if(!file || file.size>48000){el('diagnostic-status').textContent='Choose a reviewed JSON file smaller than 48 KB.';return;}
+  const button=el('diagnostic-send');button.disabled=true;
+  try{
+    const content=JSON.parse(await file.text());
+    if(!content||typeof content!=='object'||!content.commands)throw Error('Invalid diagnostic JSON file');
+    const {resultId,token}=diagnosticReceipt;
+    const response=await fetch(`/api/results/${resultId}/diagnostics/advanced`,{
+      method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,platform:content.platform,hostname:content.hostname,commands:content.commands})
+    });
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.detail||`HTTP ${response.status}`);
+    diagnosticReceipt=null;
+    el('diagnostic-file').value='';el('diagnostic-consent').checked=false;
+    el('diagnostic-status').textContent='Report saved for GMCS admin troubleshooting. Result #'+resultId;
+  }catch(err){button.disabled=false;el('diagnostic-status').textContent='Report not accepted: '+err.message;}
 });

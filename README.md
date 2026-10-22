@@ -231,3 +231,7 @@ The bounded egress probe is diagnostic only; it cannot establish the throughput
 of a particular school's ISP uplink or prove traversal of either Nexus core.
 External service reachability and egress filtering can affect results. See
 `docs/GMCS-V5-DEPLOY.md` for deployment and security details.
+
+## Client troubleshooting (v7)
+
+Each completed browser speed test now attaches small browser/network context and shows a rule-based evidence report to authorized admins in the **Client Troubleshooting Center**. Optional Windows and macOS *read-only* diagnostic scripts gather hostname, IP/DNS/gateway, route, fixed-target ping, traceroute and nslookup, plus opt-in MAC/ARP/netstat/DNS cache observations. The user must review and explicitly upload the local JSON; the website **cannot** remotely run those OS commands. See [client troubleshooting, consent, retention and upgrade instructions](docs/GMCS-CLIENT-TROUBLESHOOTING.md). Private GMCS IP ranges, Nginx settings and SMTP credentials remain server-side.
