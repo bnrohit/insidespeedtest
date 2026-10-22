@@ -28,7 +28,9 @@ from .client_email import claim_email, EmailClaimError
 from .branding_config import (DEFAULT_BRAND, init_branding, read_branding, write_branding,
                               read_logo, store_logo, clear_logo)
 from .external_diag import init_external, history as egress_history, run_external
-from .diagnostics import init_diagnostics, record_browser, submit_advanced, fetch_report, validate_advanced
+from .router_history import initialize as init_router_history, latest as latest_routers, latest_site, trend as router_trend
+from .diagnostics import (init_diagnostics, record_browser, submit_advanced, fetch_report,
+                          validate_advanced, issue_upload_code, submit_paired)
 from .identity import IdentityMatcher
 from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
                          smtp_public_config, save_smtp, put_mappings, list_agents,
@@ -154,6 +156,14 @@ class AdvancedDiagnostics(BaseModel):
     commands: dict[str, str]
 
 
+class PairedDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    upload_code: str = Field(min_length=30, max_length=80)
+    platform: str = Field(min_length=1, max_length=32)
+    hostname: str = Field(default="", max_length=100)
+    commands: dict[str, str]
+
+
 class Report(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=30, max_length=150)
@@ -227,6 +237,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     init_branding(settings.db_path)
     init_external(settings.db_path)
     init_diagnostics(settings.db_path)
+    init_router_history(settings.db_path)
     managed = setup_managed(settings.db_path, settings.mapping_path, settings.agents_path)
     mapping = IdentityMatcher.from_csv(managed['mappings'])
     agents = Agents(str(managed['agents']))
@@ -430,6 +441,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 str(result['retry_after_seconds'])+' seconds')
         return result
 
+    @app.get('/api/admin/router-hourly', dependencies=[Depends(require_admin)])
+    def admin_hourly_routers():
+        return {'sites': latest_routers(settings.db_path),
+                'windows':['6h','day','week','month','year','2years']}
+
+    @app.get('/api/admin/router-hourly/{site}', dependencies=[Depends(require_admin)])
+    def admin_hourly_graph(site: str, window: str = 'day'):
+        try:
+            return router_trend(settings.db_path, site.upper(), window)
+        except ValueError:
+            raise HTTPException(400, 'Invalid school code or chart window')
+
+    @app.get('/api/monitoring/router-hourly/{site}')
+    def librenms_site(site: str, request: Request):
+        # Monitoring access is disabled until an operator provisions a secret in
+        # the persistent private /data volume. Never disclose the credential.
+        import hmac
+        p = Path(settings.db_path).parent / 'gmcs-monitoring.token'
+        if not secure_transport(request):
+            raise HTTPException(403, 'HTTPS required')
+        get_ip(request)
+        try:
+            expected = p.read_text(encoding='utf-8').strip()
+        except OSError:
+            raise HTTPException(503, 'Monitoring integration not configured')
+        token = request.headers.get('authorization', '')
+        supplied = token.removeprefix('Bearer ') if token.startswith('Bearer ') else ''
+        if len(expected) < 32 or not hmac.compare_digest(expected, supplied):
+            raise HTTPException(401, 'Monitoring token required')
+        try:
+            data = latest_site(settings.db_path, site.upper())
+        except ValueError:
+            raise HTTPException(400, 'Invalid school code')
+        if data is None:
+            raise HTTPException(404, 'No school-router sample recorded')
+        return {'site': data['site'], 'at':data['at'], 'status':data['status'],
+                'down_mbps':data['down_mbps'], 'up_mbps':data['up_mbps'],
+                'latency_ms':data['latency_ms'], 'ping_loss':data['ping_loss'],
+                'cap_mbps':data['cap_mbps']}
+
     @app.get("/api/identity")
     def identity(request: Request):
         ip = get_ip(request)
@@ -564,6 +615,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not submit_advanced(settings.db_path, result_id, data.token, get_ip(request), report):
             raise HTTPException(403, 'Report expired, already submitted, or not your test')
         return {'status':'saved','message':'Reviewed diagnostics attached to this result for GMCS administrators'}
+
+    @app.post('/api/results/{result_id}/diagnostics/pair')
+    def create_diagnostic_pair(result_id: int, data: ClientEmailRequest, request: Request):
+        if result_id < 1 or not secure_transport(request):
+            raise HTTPException(403, 'HTTPS and a completed speed test are required')
+        pair = issue_upload_code(settings.db_path, result_id, data.token, get_ip(request))
+        if pair is None:
+            raise HTTPException(403, 'Only the original test device can request an upload code')
+        return pair
+
+    @app.post('/api/diagnostics/submit-pair')
+    def upload_paired_diagnostics(data: PairedDiagnostics, request: Request):
+        if not secure_transport(request):
+            raise HTTPException(403, 'HTTPS is required')
+        try:
+            result_id = submit_paired(settings.db_path, data.upload_code, get_ip(request),
+                                      data.model_dump(exclude={'upload_code'}))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        if result_id is None:
+            raise HTTPException(403, 'Code expired, already used, or source IP differs from speed test')
+        return {'status':'saved', 'result_id':result_id}
 
     @app.get('/api/admin/results/{result_id}/diagnostics', dependencies=[Depends(require_admin)])
     def admin_result_diagnostics(result_id: int):

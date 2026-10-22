@@ -21,6 +21,18 @@
   <p id="egress-result" class="caption" role="status">Not tested from this browser.</p>
   <div class="table-scroll"><table><thead><tr><th>TIME (UTC)</th><th>STATUS</th><th>DNS ms</th><th>TLS ms</th><th>↓ Mbps</th><th>↑ Mbps</th></tr></thead><tbody id="egress-rows"></tbody></table></div>
 </section>
+<section class="panel" aria-label="Hourly school WAN history">
+  <h2>Hourly school → NOC WAN history</h2>
+  <p>Read-only capped VyOS tests; measurements are router-to-NOC, not a student device or unrestricted ISP bandwidth. Empty periods are not treated as zero Mbps. Two years of hourly records remain in the NOC database.</p>
+  <div class="actions">
+   <label>School <select id="router-school"><option value="">Select a site</option></select></label>
+   <label>Period <select id="router-range"><option value="6h">6 hours</option><option value="day" selected>Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option><option value="2years">Two years</option></select></label>
+   <button class="secondary-btn" id="router-refresh" type="button">Refresh</button>
+  </div>
+  <p class="caption" id="router-status" role="status">Awaiting hourly collector data.</p>
+  <div id="router-graph" class="router-graph" role="img" aria-label="School router upload and download throughput over time"></div>
+  <div class="table-scroll"><table><thead><tr><th>SITE</th><th>LAST SAMPLE (UTC)</th><th>STATUS</th><th>ROUTER IP</th><th>↓ CAPPED Mbps</th><th>↑ CAPPED Mbps</th><th>LATENCY</th></tr></thead><tbody id="router-rows"></tbody></table></div>
+</section>
 <section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
 <section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
 <div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th><th>DIAGNOSTICS</th></tr></thead><tbody id="rows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>

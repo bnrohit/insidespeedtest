@@ -22,6 +22,23 @@ jobs:
       - run: python -m pytest -q
       - run: node --check app/static/branding.js && node --check app/static/admin.js && node --check app/static/test.js && node tests/client-logo.test.cjs
       - run: bash -n deploy/mdns-audit.sh deploy/nginx-version-audit.sh deploy/gmcs-safe-upgrade.sh app/static/gmcs-diagnostics-macos.sh
-      - run: python -m compileall -q app agent
+      - run: python -m compileall -q app agent integrations
       - run: python -m pip_audit -r requirements.txt
-      - run: python -m bandit -r app agent -ll -q
+      - run: python -m bandit -r app agent integrations -ll -q
+
+  powershell-syntax:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Windows diagnostics without running it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'app/static/gmcs-diagnostics-windows.ps1').Path, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host 'Windows PowerShell syntax valid. Smart App Control execution needs separate real-device validation and trusted signing.'

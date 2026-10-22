@@ -1,3 +1,11 @@
+## New: hourly school WAN trends and LibreNMS (v9)
+
+A central scheduler extends the **existing** approved VyOS-to-NOC iperf3 pilot (17 verified schools) to hourly samples. It retains two years of hourly rows in the existing SQLite mount and adds 6h/day/week/month/year/2-year admin charts. A read-only bearer-protected fixed-site endpoint powers a LibreNMS Nagios check with native performance-data graphs. No Windows/macOS/Linux endpoint agent is needed for school-router WAN measurements.
+
+**Run the separate opt-in installer only after reviewing school/site inventory and capped router test settings.** See [GMCS hourly WAN and LibreNMS integration](docs/GMCS-HOURLY-WAN-LIBRENMS.md). Private SSH keys, tokens, DB, SMTP and Nginx overrides remain untracked.
+
+---
+
 # GMCS Inside Speed Test
 
 Secure-by-design, self-hosted **school-to-NOC network speed test** with a browser interface for any authorized school user, school/VLAN inference from observed client IP, and a daily scheduled Linux school-cache agent. **The source is public; the application is intended for a district-only network.** It is not an external Internet speed test.
@@ -235,3 +243,7 @@ External service reachability and egress filtering can affect results. See
 ## Client troubleshooting (v7)
 
 Each completed browser speed test now attaches small browser/network context and shows a rule-based evidence report to authorized admins in the **Client Troubleshooting Center**. Optional Windows and macOS *read-only* diagnostic scripts gather hostname, IP/DNS/gateway, route, fixed-target ping, traceroute and nslookup, plus opt-in MAC/ARP/netstat/DNS cache observations. The user must review and explicitly upload the local JSON; the website **cannot** remotely run those OS commands. See [client troubleshooting, consent, retention and upgrade instructions](docs/GMCS-CLIENT-TROUBLESHOOTING.md). Private GMCS IP ranges, Nginx settings and SMTP credentials remain server-side.
+
+### Windows diagnostics: client-approved direct upload
+
+After a browser speed test, clients may explicitly create a 10-minute, one-use upload code and execute the GMCS-approved signed Windows diagnostics script. The report is saved locally and, after confirming submission, sent directly to the matching admin troubleshooting result. A normal download never auto-runs, and unsigned downloaded scripts are **not** guaranteed compatible with Smart App Control. Trusted signing and a Windows-trusted HTTPS certificate are required for secure deployment. See [Client Troubleshooting / Smart App Control](docs/GMCS-CLIENT-TROUBLESHOOTING.md).

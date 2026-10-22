@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import time
+import secrets
 from .database import connect
 
 ALLOWED_COMMANDS = frozenset({
@@ -20,6 +21,7 @@ ALLOWED_COMMANDS = frozenset({
 })
 MAX_COMMAND_CHARS = 3600
 MAX_REPORT_CHARS = 34000
+PAIR_SECONDS = 600
 
 
 def init_diagnostics(db_path: str):
@@ -34,6 +36,14 @@ def init_diagnostics(db_path: str):
             created_at INTEGER NOT NULL
         )''')
         con.execute('CREATE INDEX IF NOT EXISTS idx_client_diag_ip ON client_diagnostics(client_ip)')
+        con.execute("""CREATE TABLE IF NOT EXISTS diagnostic_upload_codes (
+          code_hash TEXT PRIMARY KEY,
+          result_id INTEGER NOT NULL UNIQUE,
+          client_ip TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
+        )""")
+        con.execute('CREATE INDEX IF NOT EXISTS idx_diag_codes_expires ON diagnostic_upload_codes(expires_at)')
+        con.execute('DELETE FROM diagnostic_upload_codes WHERE expires_at <= ?', (int(time.time()),))
         # Minimize retention of client device details; do not keep indefinitely.
         con.execute('DELETE FROM client_diagnostics WHERE created_at<?', (int(time.time())-30*86400,))
 
@@ -78,6 +88,51 @@ def submit_advanced(db_path: str, result_id: int, token: str, ip: str, data: dic
              (content, int(time.time()), result_id, ip,
               hashlib.sha256(token.encode()).hexdigest(), int(time.time())-86400))
         return result.rowcount == 1
+
+
+def issue_upload_code(db_path: str, result_id: int, token: str, ip: str) -> dict | None:
+    """Short-lived one-time pairing code only the original test browser may request."""
+    now = int(time.time())
+    code = secrets.token_urlsafe(24)
+    with connect(db_path) as con:
+        con.execute('BEGIN IMMEDIATE')
+        con.execute('DELETE FROM diagnostic_upload_codes WHERE expires_at <= ?', (now,))
+        row = con.execute("""SELECT 1 FROM client_diagnostics d JOIN results r ON r.id=d.result_id
+          WHERE d.result_id=? AND d.client_ip=? AND d.token_hash=?
+          AND d.advanced_at IS NULL AND d.created_at>=? AND r.agent_id='' AND r.client_ip=?""",
+          (result_id, ip, hashlib.sha256(token.encode()).hexdigest(), now-86400, ip)).fetchone()
+        if row is None:
+            return None
+        # Rotating the code invalidates the previous one. No plaintext codes in SQLite.
+        con.execute('DELETE FROM diagnostic_upload_codes WHERE result_id=?', (result_id,))
+        con.execute("""INSERT INTO diagnostic_upload_codes(code_hash,result_id,client_ip,expires_at)
+          VALUES (?,?,?,?)""", (hashlib.sha256(code.encode()).hexdigest(),result_id,ip,now+PAIR_SECONDS))
+    return {'upload_code':code,'expires_in_seconds':PAIR_SECONDS,'result_id':result_id}
+
+
+def submit_paired(db_path: str, code: str, ip: str, data: dict) -> int | None:
+    """Atomically redeem paired report; exact source IP and one submission only."""
+    report = json.dumps(validate_advanced(data), separators=(',', ':'))
+    now = int(time.time())
+    with connect(db_path) as con:
+        con.execute('BEGIN IMMEDIATE')
+        row=con.execute("""SELECT p.result_id FROM diagnostic_upload_codes p
+          JOIN client_diagnostics d ON d.result_id=p.result_id
+          JOIN results r ON r.id=p.result_id
+          WHERE p.code_hash=? AND p.client_ip=? AND p.expires_at>?
+            AND d.client_ip=? AND d.advanced_at IS NULL AND d.created_at>=?
+            AND r.agent_id='' AND r.client_ip=?""",
+          (hashlib.sha256(code.encode()).hexdigest(),ip,now,ip,now-86400,ip)).fetchone()
+        if row is None:
+            return None
+        rid=int(row['result_id'])
+        changed=con.execute("""UPDATE client_diagnostics
+          SET advanced_json=?,advanced_at=? WHERE result_id=? AND advanced_at IS NULL""",
+          (report,now,rid)).rowcount
+        if changed!=1:
+            return None
+        con.execute('DELETE FROM diagnostic_upload_codes WHERE result_id=?', (rid,))
+    return rid
 
 
 def fetch_report(db_path: str, result_id: int) -> dict | None:

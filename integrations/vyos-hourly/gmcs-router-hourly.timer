@@ -1,0 +1,12 @@
+[Unit]
+Description=GMCS VyOS hourly speed tests, staggered after daily report
+
+[Timer]
+OnCalendar=*-*-* *:45:00
+Persistent=true
+RandomizedDelaySec=0
+AccuracySec=1min
+Unit=gmcs-router-hourly.service
+
+[Install]
+WantedBy=timers.target

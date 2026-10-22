@@ -23,7 +23,7 @@ FILES=(
  app/static/admin.html app/static/admin.js app/static/index.html
  app/static/login.html app/static/login.js app/static/style.css app/static/test.js
  app/static/branding.js app/static/gmcs-logo.png
- app/branding_config.py app/external_diag.py app/diagnostics.py
+ app/branding_config.py app/external_diag.py app/diagnostics.py app/router_history.py
  app/static/gmcs-diagnostics-windows.ps1 app/static/gmcs-diagnostics-macos.sh
 )
 for rel in "${FILES[@]}"; do
@@ -54,7 +54,7 @@ PY
 (( ${#COMPOSE[@]} > 0 )) || { echo 'Cannot resolve Compose command: no changes made' >&2; exit 1; }
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="/home/rohith/gmcs-speedtest-upgrades/github-v5-$STAMP"
+BACKUP="/home/rohith/gmcs-speedtest-upgrades/github-v9-$STAMP"
 mkdir -p "$BACKUP/source"
 printf '%s\n' "${FILES[@]}" > "$BACKUP/files.txt"
 printf '%s\n' "$SOURCE_REV" > "$BACKUP/git-commit.txt"
@@ -144,7 +144,7 @@ if ! (cd "$ROOT" && sha256sum -c "$BACKUP/private.sha256" >/dev/null); then
   exit 1
 fi
 
-echo "SUCCESS: GMCS speed-test admin branding + NOC Internet diagnostics upgrade healthy."
+echo "SUCCESS: GMCS v9 backend, diagnostics and hourly-router graphs healthy."
 echo "GitHub commit: $SOURCE_REV"
 echo "Private IP, Nginx and SMTP files unchanged."
 echo "Database backup: $BACKUP/results-before.sqlite3"

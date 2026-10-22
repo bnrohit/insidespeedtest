@@ -234,7 +234,7 @@ async function initializeAdmin(){
   try{
     const session=await req('/api/admin/session');
     csrfToken=session.csrf_token;
-    await Promise.all([refresh(),loadConfig(),loadBranding(),refreshEgress()]);
+    await Promise.all([refresh(),loadConfig(),loadBranding(),refreshEgress(),loadRouterSites()]);
   }catch(err){
     window.location.replace('/admin');
   }
@@ -291,3 +291,75 @@ el('diag-open').addEventListener('click',()=>{
   if(!Number.isSafeInteger(id)||id<1){el('diag-status').textContent='Enter a valid result number.';return;}
   openDiagnostics(id);
 });
+
+// Authenticated, read-only visualization: no remote commands and no user-defined targets.
+const routerSvgNS='http://www.w3.org/2000/svg';
+function routerSvg(name,attr={}){const n=document.createElementNS(routerSvgNS,name);for(const [k,v] of Object.entries(attr))n.setAttribute(k,String(v));return n;}
+function routerDraw(result){
+  const root=el('router-graph');root.replaceChildren();
+  const data=result.points||[];
+  if(!data.length){root.textContent='No hourly measurements for this time range.';return;}
+  const svg=routerSvg('svg',{viewBox:'0 0 900 250',role:'img','aria-label':'Download teal, upload blue; time left to right'});
+  const pad=40,left=pad,top=12,width=820,height=190;
+  const first=data[0].at,last=data[data.length-1].at;
+  const nums=data.flatMap(p=>[p.down_mbps,p.up_mbps]).filter(v=>v!==null && Number.isFinite(v));
+  const max=Math.max(1,...nums)*1.15;
+  const x=(at)=>left+(at-first)/Math.max(last-first,3600)*width;
+  const y=(value)=>top+height-value/max*height;
+  for(const val of [0,0.5,1]){
+    const gy=top+height*(1-val);
+    svg.append(routerSvg('line',{x1:left,y1:gy,x2:left+width,y2:gy,stroke:'#64748b','stroke-opacity':0.35}));
+    const t=routerSvg('text',{x:0,y:gy+5,fill:'currentColor','font-size':12});t.textContent=(max*val).toFixed(1);svg.append(t);
+  }
+  function addLine(field,color){
+    // Break at missing/failed samples so gaps are never presented as zero or continuous.
+    let segments=[],current=[];
+    for(const p of data){
+      if(p[field]===null || !Number.isFinite(p[field])){if(current.length)segments.push(current);current=[];continue;}
+      current.push(`${x(p.at).toFixed(1)},${y(p[field]).toFixed(1)}`);
+    }
+    if(current.length)segments.push(current);
+    for(const pts of segments){
+      if(pts.length>1)svg.append(routerSvg('polyline',{points:pts.join(' '),fill:'none',stroke:color,'stroke-width':2.5}));
+      else {const [cx,cy]=pts[0].split(',');svg.append(routerSvg('circle',{cx,cy,r:3,fill:color}));}
+    }
+  }
+  addLine('down_mbps','#14b8a6');addLine('up_mbps','#60a5fa');
+  for(const [p,label] of [[first,'Start'],[last,'Latest']]){
+    const t=routerSvg('text',{x:x(p),y:230,fill:'currentColor','font-size':12,'text-anchor':p===first?'start':'end'});
+    t.textContent=label+' '+new Date(p*1000).toISOString().slice(0,16).replace('T',' ');svg.append(t);
+  }
+  root.append(svg);
+  const legend=document.createElement('p');legend.className='caption';legend.textContent='Teal = download, blue = upload. Samples are throughput capped on the VyOS test.';root.append(legend);
+}
+async function loadRouterSites(){
+  try {
+    const result=await req('/api/admin/router-hourly');
+    const selector=el('router-school');const existing=selector.value;
+    selector.replaceChildren();
+    for(const site of result.sites){
+      const opt=document.createElement('option');opt.value=site.site;opt.textContent=site.site+' — '+site.name;selector.append(opt);
+    }
+    if(result.sites.some(s=>s.site===existing))selector.value=existing;
+    const rows=el('router-rows');rows.replaceChildren();
+    for(const r of result.sites){const tr=document.createElement('tr');
+      for(const v of [r.site,new Date(r.at*1000).toISOString().slice(0,16),r.status,r.router_ip,r.down_mbps,r.up_mbps,r.latency_ms])cell(tr,v);
+      rows.append(tr);
+    }
+    if(!result.sites.length){el('router-status').textContent='No hourly samples yet. Run the opt-in collector first.';return;}
+    await loadRouterGraph();
+  }catch(e){el('router-status').textContent='Unable to retrieve WAN history: '+e.message;}
+}
+async function loadRouterGraph(){
+  const site=el('router-school').value;
+  if(!site){el('router-graph').replaceChildren();return;}
+  try{
+    const result=await req('/api/admin/router-hourly/'+encodeURIComponent(site)+'?window='+encodeURIComponent(el('router-range').value));
+    const valid=result.points.reduce((n,p)=>n+(p.down_mbps!==null?1:0),0);
+    el('router-status').textContent=`${site}: ${result.points.length} time buckets; ${valid} include throughput. Capped test (not full ISP rate).`;
+    routerDraw(result);
+  }catch(e){el('router-status').textContent='WAN chart unavailable: '+e.message;}
+}
+el('router-school').addEventListener('change',loadRouterGraph);
+el('router-range').addEventListener('change',loadRouterGraph);
+el('router-refresh').addEventListener('click',loadRouterSites);

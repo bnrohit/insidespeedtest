@@ -89,3 +89,60 @@ def test_reports_are_suggestions_not_diagnosis():
         try:validate_advanced(bad)
         except ValueError:pass
         else:raise AssertionError('Dangerous diagnostics accepted')
+
+
+def test_paired_diagnostics_auto_upload_only_with_one_use_code(tmp_path):
+    app, settings = setup(tmp_path)
+    client = TestClient(app, base_url='https://gmcs.test', client=('10.64.241.15', 50000))
+    other = TestClient(app, base_url='https://gmcs.test', client=('10.64.241.16', 50001))
+    rid, token = finished(client)
+    pair = client.post(f'/api/results/{rid}/diagnostics/pair', json={'token':token})
+    assert pair.status_code == 200, pair.text
+    assert pair.json()['expires_in_seconds'] == 600
+    code = pair.json()['upload_code']
+    payload = {'upload_code':code, 'platform':'Windows','hostname':'DEVICE',
+               'commands':{'ipconfig':'DNS Servers . . . 10.100.17.11'}}
+    assert other.post('/api/diagnostics/submit-pair', json=payload).status_code == 403
+    assert client.post('/api/diagnostics/submit-pair',json={**payload,'upload_code':'A'*32}).status_code == 403
+    assert client.post('/api/diagnostics/submit-pair',json=payload).status_code == 200
+    assert client.post('/api/diagnostics/submit-pair',json=payload).status_code == 403
+    assert client.post(f'/api/results/{rid}/diagnostics/pair',json={'token':token}).status_code == 403
+    assert client.post('/api/admin/login',json={'username':'gmcsadmin','password':settings.admin_password}).status_code == 204
+    assert client.get(f'/api/admin/results/{rid}/diagnostics').json()['advanced']['hostname'] == 'DEVICE'
+    with sqlite3.connect(settings.db_path) as sql:
+        assert sql.execute('SELECT COUNT(*) FROM diagnostic_upload_codes').fetchone()[0] == 0
+
+
+def test_paired_code_rotation_and_expiration(tmp_path):
+    import time
+    app,_=setup(tmp_path)
+    c=TestClient(app,base_url='https://gmcs.test',client=('10.64.241.15',50000))
+    rid,token=finished(c)
+    route=f'/api/results/{rid}/diagnostics/pair'
+    old=c.post(route,json={'token':token}).json()['upload_code']
+    new=c.post(route,json={'token':token}).json()['upload_code']
+    assert old!=new
+    payload={'platform':'Windows','hostname':'A','commands':{'ping_internal':'ok'}}
+    assert c.post('/api/diagnostics/submit-pair',json={**payload,'upload_code':old}).status_code==403
+    with sqlite3.connect(app.state.settings.db_path) as sql:
+        sql.execute('UPDATE diagnostic_upload_codes SET expires_at=?',(int(time.time())-1,))
+    assert c.post('/api/diagnostics/submit-pair',json={**payload,'upload_code':new}).status_code==403
+
+
+def test_http_cannot_pair_or_upload(tmp_path):
+    app,_=setup(tmp_path)
+    c=TestClient(app,base_url='http://gmcs.test',client=('10.64.241.15',50000))
+    rid,token=finished(c)
+    assert c.post(f'/api/results/{rid}/diagnostics/pair',json={'token':token}).status_code==403
+    assert c.post('/api/diagnostics/submit-pair',json={
+        'upload_code':'x'*32,'platform':'Windows','hostname':'a',
+        'commands':{'ping_external':'ok'}}).status_code==403
+
+
+def test_unrelated_result_cannot_get_pair(tmp_path):
+    app,_=setup(tmp_path)
+    a=TestClient(app,base_url='https://gmcs.test',client=('10.64.241.15',50000))
+    b=TestClient(app,base_url='https://gmcs.test',client=('10.64.241.16',50000))
+    rid,token=finished(a)
+    assert b.post(f'/api/results/{rid}/diagnostics/pair',json={'token':token}).status_code==403
+    assert a.post(f'/api/results/{rid}/diagnostics/pair',json={'token':'B'*43}).status_code==403

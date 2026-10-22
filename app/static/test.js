@@ -104,6 +104,8 @@ start.addEventListener('click',async()=>{
   running=true;start.disabled=true;
   emailReceipt=null;diagnosticReceipt=null;el('send-email-panel').hidden=true;
   el('diagnostic-send').disabled=true;
+  el('diagnostic-pair').disabled=true;
+  el('diagnostic-pair-code').value='';
   el('diagnostic-status').textContent='Finish a speed test to enable optional diagnostics upload.';
   el('result-message').textContent='';el('download').textContent='—';el('upload').textContent='—';
   el('latency').textContent='—';el('jitter').textContent='—';el('live-value').textContent='0.0';
@@ -149,6 +151,7 @@ start.addEventListener('click',async()=>{
     const answer=await jsonApi('/api/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:session.token,download_mbps:down.mbps,upload_mbps:up.mbps,download_bytes:down.bytes,upload_bytes:up.bytes,...ping,browser_diagnostics:browserDiag})});
     diagnosticReceipt={resultId:answer.result_id,token:session.token};
     el('diagnostic-send').disabled=false;
+    el('diagnostic-pair').disabled=false;
     el('diagnostic-status').textContent='Result #'+answer.result_id+' ready. Optional: review your locally generated JSON before uploading. Sensitive sections require explicit consent.';
     updateProgress(100,'Completed • Result #' + answer.result_id,'COMPLETE');
     el('result-message').textContent=`Recorded for ${answer.school}, VLAN ${answer.vlan}. Automatic notification: ${answer.email_notification}.`;
@@ -211,4 +214,23 @@ el('diagnostic-send').addEventListener('click',async()=>{
     el('diagnostic-file').value='';el('diagnostic-consent').checked=false;
     el('diagnostic-status').textContent='Report saved for GMCS admin troubleshooting. Result #'+resultId;
   }catch(err){button.disabled=false;el('diagnostic-status').textContent='Report not accepted: '+err.message;}
+});
+
+// User-initiated one-time pairing. Browsers never execute downloaded native scripts.
+el('diagnostic-pair').addEventListener('click',async()=>{
+  if(!diagnosticReceipt){el('diagnostic-status').textContent='Run a speed test first.';return;}
+  if(!el('diagnostic-consent').checked){
+    el('diagnostic-status').textContent='Please acknowledge which device/network details may be uploaded first.';
+    return;
+  }
+  const button=el('diagnostic-pair');button.disabled=true;
+  try{
+    const {resultId,token}=diagnosticReceipt;
+    const pair=await jsonApi(`/api/results/${resultId}/diagnostics/pair`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})
+    });
+    el('diagnostic-pair-code').value=pair.upload_code;
+    el('diagnostic-status').textContent=`Code for test #${resultId} expires in 10 minutes. Copy it into the approved Windows script after launching it; the script saves the report, asks you to confirm, then uploads automatically. Browser-only uploads remain available.`;
+  }catch(err){el('diagnostic-status').textContent='Could not create code: '+err.message;}
+  finally{button.disabled=false;}
 });
