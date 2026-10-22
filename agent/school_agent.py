@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free, authenticated scheduled internal speed test for Linux school caches.
+"""Dependency-free, authenticated internal speed test for VyOS routers or Linux school hosts.
 
 Only reports to the configured HTTPS GMCS service; the GMCS server emails admins.
 Use the school VM's trusted district CA (optionally via SPEEDTEST_CA_FILE).
@@ -31,8 +31,8 @@ def open_url(opener, url: str, *, method='GET', headers=None, data=None, timeout
 def run(args):
     base = args.url.rstrip('/')
     parsed = urllib.parse.urlparse(base)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError('SPEEDTEST_URL must be a plain https:// hostname (optional port), without credentials or query')
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/') or parsed.params:
+        raise ValueError('SPEEDTEST_URL must be a plain https:// hostname (optional port), without path, credentials or query')
     token_file = Path(args.token_file)
     stat = token_file.stat()
     if stat.st_mode & 0o007:

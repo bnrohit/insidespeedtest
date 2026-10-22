@@ -68,5 +68,5 @@ def graph(db_path: str, agent_id: str, window: str, now: int | None = None) -> d
           GROUP BY 1 ORDER BY at''',
           (step,step,agent_id,n-seconds,n)).fetchall()
     return {'agent_id':agent_id, 'range':window,
-            'path':'School agent device to GMCS NOC HTTPS server; NOT VyOS router or Internet speed',
+            'path':'School VyOS or Linux agent to GMCS NOC HTTPS server; not public Internet speed or central SSH/iperf3',
             'retention_days':RETENTION_DAYS,'points':[dict(row) for row in rows]}

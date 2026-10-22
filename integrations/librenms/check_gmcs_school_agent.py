@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LibreNMS read-only service plugin: cache school-host agent samples, never run a test.
+"""LibreNMS read-only service plugin: graph school-side VyOS or Linux agent samples, never run a test.
 
 Deploy on the LibreNMS POLLER only. The token does not belong on school hosts.
 """
@@ -51,12 +51,12 @@ def check(agent_id: str, base_url: str, token_file: str, ca_file=None, now=None)
         if data['loss_pct']>100 or data['download_mbps']>100000 or data['upload_mbps']>100000:
             return 3,'UNKNOWN - Out of bounds sample'
         d=data
-        perf=(f"download_mbps={d['download_mbps']:.3f}Mbps;;;0; "
-              f"upload_mbps={d['upload_mbps']:.3f}Mbps;;;0; "
+        perf=(f"download_mbps={d['download_mbps']:.3f};;;0; "
+              f"upload_mbps={d['upload_mbps']:.3f};;;0; "
               f"latency_ms={d['latency_ms']:.3f}ms;;;0; "
               f"jitter_ms={d['jitter_ms']:.3f}ms;;;0; "
               f"loss_pct={d['loss_pct']:.3f}%;0;100;0;100")
-        return 0, (f"OK - {agent_id} school-host to GMCS NOC: "
+        return 0, (f"OK - {agent_id} school-side HTTP(S) to GMCS NOC: "
                    f"down {d['download_mbps']:.2f}, up {d['upload_mbps']:.2f} Mbps ({age//60}m old) | {perf}")
     except (OSError,ValueError,KeyError,OverflowError,json.JSONDecodeError, http.client.HTTPException) as exc:
         return 3,'UNKNOWN - Monitoring API unavailable ('+type(exc).__name__+')'
@@ -66,6 +66,9 @@ def check(agent_id: str, base_url: str, token_file: str, ca_file=None, now=None)
 
 def main():
     parser=argparse.ArgumentParser()
+    # LibreNMS services supply -H <device hostname/IP> automatically. The
+    # metric source is still the explicit agent ID, not the device's SNMP IP.
+    parser.add_argument('-H', '--hostname', default='', help='LibreNMS device address (label only)')
     parser.add_argument('--agent-id',required=True)
     parser.add_argument('--url',required=True)
     parser.add_argument('--token-file',required=True)

@@ -1,8 +1,10 @@
+> **VyOS router as the school agent?** Use [VyOS on-router installer and LibreNMS router-device graphs](GMCS-VYOS-SCHOOL-AGENT-LIBRENMS.md) instead of Linux systemd setup.
+
 # GMCS: school-host hourly measurements, independently graphed in LibreNMS
 
 ## The **separate** measurement paths
 
-1. **School machine (recommended):** a dedicated Linux VM/cache at *each school* runs `agent/school_agent.py` from its campus LAN, using HTTPS **outbound** to `10.250.31.192:18443`. Its credential is individually created under Admin > Configuration > Scheduled Linux school servers and bound to its observed source IP. The HTTP application measures throughput itself, so no iperf3 SSH access to VyOS is needed. The school agent schedules one test per hour, from `:05` with up to 25 minutes stable per-host offset, limiting traffic spikes. A specific site's agent must have connectivity to the NOC server; machines that cannot reach it do not get fake zeros.
+1. **School machine (recommended):** a dedicated Linux VM/cache at *each school* runs `agent/school_agent.py` from its campus LAN, using HTTPS **outbound** to `10.250.31.192:18443`. Its credential is individually created under Admin > Configuration > Scheduled school agents (VyOS / Linux) and bound to its observed source IP. The HTTP application measures throughput itself, so no iperf3 SSH access to VyOS is needed. The school agent schedules one test per hour, from `:05` with up to 25 minutes stable per-host offset, limiting traffic spikes. A specific site's agent must have connectivity to the NOC server; machines that cannot reach it do not get fake zeros.
 2. **Existing VyOS router SSH collector (separate/optional):** centrally SSHs to some VyOS routers and runs capped iperf3 to NOC. Its history table (`vyos_hourly`), timers, dashboard and LibreNMS plugin are **different** and remain unchanged. Do **not** call these tests school-host measurements.
 3. **LibreNMS (read-only pull):** polls a tiny authenticated endpoint on central GMCS and saves one Nagios service's performance data per registered *school host* in LibreNMS RRD files. It **does not connect to school agents** or trigger the tests. Do not distribute LibreNMS tokens onto school agents.
 4. **Browser speed test:** student/staff measurements and troubleshooting upload remain independent and are not used for scheduled agent graphs.
@@ -28,7 +30,7 @@ sudo bash /home/rohith/insidespeedtest-upstream/deploy/gmcs-safe-upgrade.sh
 curl -fsS http://127.0.0.1:18080/healthz
 ```
 
-In Admin > Configuration > Scheduled Linux school servers, create `CDE-CACHE01` with its verified **source IP `/32`** (example: `10.21.1.25/32` is **illustrative**, not an assertion of CDE's real IP). Save the one-time token on the school machine privately; register each site individually. Existing VLAN/IP mappings are not modified.
+In Admin > Configuration > Scheduled school agents (VyOS / Linux), create `CDE-CACHE01` with its verified **source IP `/32`** (example: `10.21.1.25/32` is **illustrative**, not an assertion of CDE's real IP). Save the one-time token on the school machine privately; register each site individually. Existing VLAN/IP mappings are not modified.
 
 ## 2. School Linux VM installation
 

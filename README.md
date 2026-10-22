@@ -260,3 +260,7 @@ under a **separate School Agents panel**; LibreNMS monitors the cached per-agent
 `integrations/librenms/check_gmcs_school_agent.py`, and maintains independent service graphs.
 Do not put LibreNMS API secrets on school agents or confuse these with central router/iperf tests.
 See [`docs/GMCS-SCHOOL-AGENT-HOURLY-LIBRENMS.md`](docs/GMCS-SCHOOL-AGENT-HOURLY-LIBRENMS.md).
+
+### VyOS routers as active school speed-test agents
+
+Deploy a persistent VyOS on-router hourly HTTPS speed-test agent and attach its measurements to the **existing school VyOS router device** as a LibreNMS service. VyOS/host agents run the test; LibreNMS only reads cached metrics and records performance RRD graphs. See [VyOS school-agent & LibreNMS instructions](docs/GMCS-VYOS-SCHOOL-AGENT-LIBRENMS.md). No modification of the centralized SSH collector.

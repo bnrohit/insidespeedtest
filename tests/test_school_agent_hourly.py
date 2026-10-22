@@ -107,6 +107,6 @@ def test_librenms_reads_cached_sample_and_never_executes_test(tmp_path,monkeypat
         def close(self):pass
     monkeypatch.setattr(plugin.http.client,'HTTPSConnection',FakeConnection)
     code,message=plugin.check('CDE-CACHE01','https://gmcs.test:18443',str(tokenfile),now=now)
-    assert code==0 and 'download_mbps=29.500Mbps' in message
+    assert code==0 and 'download_mbps=29.500;;;0;'  in message
     assert plugin.check('CDE-CACHE01','http://gmcs.test',str(tokenfile),now=now)[0]==3
     assert plugin.check('CDE-CACHE01/../../a','https://gmcs.test',str(tokenfile),now=now)[0]==3
