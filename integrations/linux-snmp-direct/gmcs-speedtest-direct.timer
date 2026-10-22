@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly verified GMCS school Linux speed test
+
+[Timer]
+OnCalendar=*-*-* *:23:00
+RandomizedDelaySec=25min
+FixedRandomDelay=true
+Persistent=false
+AccuracySec=1min
+Unit=gmcs-speedtest-direct.service
+
+[Install]
+WantedBy=timers.target

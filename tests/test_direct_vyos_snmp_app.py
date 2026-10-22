@@ -24,6 +24,31 @@ def config():
                        'ca_file':'/config/auth/gmcs-speedtest/ca.pem'}}
 
 
+def test_linux_secret_paths_are_allowed_but_arbitrary_paths_are_not():
+    m=load('collect.py','direct_linux_config')
+    c=config()
+    c['inside']['token_file']='/etc/gmcs-speedtest/token'
+    c['inside']['ca_file']='/etc/gmcs-speedtest/ca.pem'
+    assert m.validated(c)==c
+    for token_path in ('/etc/shadow','/etc/gmcs-speedtest/../shadow',
+                       '/var/lib/gmcs-speedtest/token'):
+        bad={'inside':dict(c['inside'],token_file=token_path)}
+        with pytest.raises(ValueError):
+            m.validated(bad)
+
+
+def test_linux_direct_install_files_present_and_safe():
+    base=Path(__file__).resolve().parents[1]/'integrations/linux-snmp-direct'
+    script=(base/'install.sh').read_text()
+    assert 'systemctl daemon-reload' in script
+    assert 'systemctl enable --now gmcs-speedtest-direct.timer' not in script
+    assert 'snmpd.conf' in script
+    assert (base/'gmcs-speedtest-direct.timer').is_file()
+    assert (base/'gmcs-speedtest-direct.service').is_file()
+    assert '--agent-script /opt/gmcs-speedtest-direct/school_agent.py' in (base/'gmcs-speedtest-direct.service').read_text()
+    assert 'extend gmcs_vyos_speedtest' in script
+
+
 def test_configuration_rejects_ookla_plain_http_and_bad_paths():
     m=load('collect.py','direct_collect_a')
     c=config();assert m.validated(c)==c

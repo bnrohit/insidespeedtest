@@ -2,7 +2,7 @@
 
 **No Ookla, no central SSH/iperf speed-test scheduler, and no LibreNMS-triggered speed test.** Each school VyOS router runs the GMCS HTTPS transfer test itself. Its measured result is cached on that same router. LibreNMS retrieves only that result using the router's existing SNMPv3 management credentials, and writes new RRD datasets under **Apps → GMCS VyOS Speedtest**. The GMCS Debian server (`10.250.31.192:18443`) serves test bytes and accepts the normal authenticated result; it **does not initiate or calculate router-side measurements**.
 
-A normal Linux machine can use the existing `agent/school_agent.py` scheduler, but to show *this* native LibreNMS Apps entry, the SNMP extend must be hosted on the VyOS router being monitored. This is deliberately separate from existing browser diagnostics, central VM egress tests, and the older VyOS SSH test collector.
+A normal Debian/Ubuntu Linux school machine can also run **the same app** using the separate `integrations/linux-snmp-direct/` installer, which caches its own local speed-test results and exposes the same SNMP extension on that Linux host. LibreNMS will graph those real Linux-local measurements on the Linux device's Apps tab. This is deliberately separate from browser diagnostics, central VM egress tests, and the older VyOS SSH test collector.
 
 ## 1. Enroll one school VyOS router, then install the agent code
 
@@ -98,3 +98,37 @@ RRDs only accumulate observations **from the date this new application first sta
 - Missing SNMP output: verify the VyOS extension is committed/saved, SNMPv3 view, execute permission and cache traversal as the SNMP runtime account.
 - No **Apps** entry: verify LibreNMS PHP poller path, enable applications discovery and run discovery/polling on exactly this VyOS device.
 - Blank RRD: first confirm a fresh local test and SNMP output, then validate the LibreNMS application poller and datapoint DS names (`inside_down`, `inside_up`, `inside_ping`, `inside_jitter`, `inside_loss`).
+
+## 6. Linux school-host alternative — same LibreNMS application
+
+Do **not** install the Linux service on the central NOC speed-test VM: a school-side Linux machine must run its own test over HTTPS, independently. On the selected Debian/Ubuntu school host, clone this repo (or copy it with SCP) and run:
+
+```sh
+git clone https://github.com/bnrohit/insidespeedtest.git
+cd insidespeedtest
+sudo sh integrations/linux-snmp-direct/install.sh
+```
+
+Register a unique `SCHOOL-LINUX01` identity and actual observed source IP in the *same GMCS Admin enrollment page* as VyOS routers. Edit `/etc/gmcs-speedtest/direct.json` and enable the test with an HTTPS URL whose certificate verifies. Write the one-time secret token to `/etc/gmcs-speedtest/token`, owned `root:gmcs-speedtest`, mode `0640`. The optional `ca_file` belongs at `/etc/gmcs-speedtest/ca.pem` and must be group-readable. Run:
+
+```sh
+sudo -u gmcs-speedtest /usr/bin/python3 /opt/gmcs-speedtest-direct/collect.py --config /etc/gmcs-speedtest/direct.json --cache /var/lib/gmcs-speedtest-direct/latest.json --agent-script /opt/gmcs-speedtest-direct/school_agent.py --validate-only
+sudo systemctl start gmcs-speedtest-direct.service
+sudo systemctl status gmcs-speedtest-direct.service --no-pager
+sudo /usr/bin/python3 /opt/gmcs-speedtest-direct/extend.py /var/lib/gmcs-speedtest-direct/latest.json
+```
+
+A successful output has `data.status=ok` and `data.source=vyos-local-gmcs-https` (the fixed protocol identifier is shared by VyOS and Linux; it means local GMCS HTTPS test, **not** NOC/server status). Add to existing `/etc/snmp/snmpd.conf` (keep existing SNMPv3 configuration and management ACLs):
+
+```text
+extend gmcs_vyos_speedtest /usr/bin/python3 /opt/gmcs-speedtest-direct/extend.py /var/lib/gmcs-speedtest-direct/latest.json
+```
+
+Ensure the SNMP service account can read `/var/lib/gmcs-speedtest-direct/latest.json`, then `sudo systemctl restart snmpd`. From LibreNMS use the same SNMP GET and custom PHP app procedure above, on the **Linux host's own device**. Finally schedule hourly measurements:
+
+```sh
+sudo systemctl enable --now gmcs-speedtest-direct.timer
+sudo systemctl list-timers gmcs-speedtest-direct.timer
+```
+
+Do not run both `gmcs-speedtest.timer` (the older Linux scheduler) and `gmcs-speedtest-direct.timer` on the same host, unless there is an explicit requirement for duplicate tests.

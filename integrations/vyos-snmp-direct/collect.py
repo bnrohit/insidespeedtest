@@ -42,10 +42,12 @@ def validated(config: dict) -> dict:
             value=inside.get(field,'')
             if field=='token_file' and not value:
                 raise ValueError('Missing token path')
-            if value and not Path(value).is_relative_to('/config/auth/gmcs-speedtest'):
-                raise ValueError('Secret and CA paths must stay under /config/auth/gmcs-speedtest')
-            if value and ('..' in Path(value).parts or value=='/config/auth/gmcs-speedtest'):
-                raise ValueError('Invalid path')
+            secret_roots = (Path('/config/auth/gmcs-speedtest'), Path('/etc/gmcs-speedtest'))
+            location = Path(value)
+            if value and ('..' in location.parts or not location.is_absolute()
+                          or not any(location.is_relative_to(root) and location != root
+                                     for root in secret_roots)):
+                raise ValueError('Token and CA paths must remain in an approved secret directory')
     return config
 
 
@@ -106,9 +108,9 @@ def persist(path:Path,content:dict):
         if os.path.exists(temp):os.unlink(temp)
 
 
-def run(config_path:Path,cache_path:Path):
+def run(config_path:Path,cache_path:Path,agent_script:Path=DEFAULT_AGENT):
     config=validated(json.loads(config_path.read_text(encoding='utf-8')))
-    measured=measure(config['inside'])
+    measured=measure(config['inside'],script=agent_script)
     # Timestamp the completed measurement, not the beginning of the test.
     now=int(time.time())
     persist(cache_path,{'version':1,'at':now,'inside':measured})
@@ -120,12 +122,13 @@ def main():
     cli=argparse.ArgumentParser(description='VyOS-local GMCS HTTPS speed test')
     cli.add_argument('--config',type=Path,default=DEFAULT_CONFIG)
     cli.add_argument('--cache',type=Path,default=DEFAULT_CACHE)
+    cli.add_argument('--agent-script',type=Path,default=DEFAULT_AGENT)
     cli.add_argument('--validate-only',action='store_true')
     a=cli.parse_args()
     if a.validate_only:
         validated(json.loads(a.config.read_text(encoding='utf-8')))
         print('GMCS configuration validated (no tests sent, no credentials disclosed)')
         return 0
-    return run(a.config,a.cache)
+    return run(a.config,a.cache,a.agent_script)
 
 if __name__=='__main__':sys.exit(main())
