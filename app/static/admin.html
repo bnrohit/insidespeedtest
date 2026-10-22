@@ -2,6 +2,25 @@
 <title>Admin | GMCS Inside Speed Test</title><link rel="stylesheet" href="/static/style.css"></head>
 <body><main class="shell admin-shell"><header class="topbar"><div class="brand"><div class="mark">G</div><div><strong>GMCS</strong><span>NETWORK OPERATIONS</span></div></div><div class="admin-actions"><a href="/" class="quiet-link">← Back to speed test</a><button id="logout" type="button" class="secondary-btn">Log out</button></div></header>
 <section class="hero"><div class="eyebrow">ADMINISTRATION / LIVE RESULTS</div><h1>Network <em>Overview</em></h1><p>Results from scheduled school Linux agents and manual browser tests. Email delivery status is recorded for each submitted test.</p></section>
+<section class="panel branding-admin" aria-label="Admin only website personalization">
+  <h2>Website branding — administrators only</h2><p>Changes appear to all school visitors and survive container upgrades. Clients cannot edit these settings.</p>
+  <div class="form-grid"><label>Organization name<input id="brand-org" maxlength="60" value="GMCS"></label>
+  <label>Website/browser title<input id="brand-site" maxlength="90" value="GMCS Inside Speed Test"></label>
+  <label>Organization subtitle<input id="brand-tagline" maxlength="80" value="NETWORK OPERATIONS"></label>
+  <label>Main heading<input id="brand-heading" maxlength="90" value="Inside Speed Test"></label></div>
+  <label>Website introduction<textarea id="brand-description" rows="3" maxlength="320"></textarea></label>
+  <div class="actions"><button id="brand-save" class="secondary-btn" type="button">Save website name and text</button></div>
+  <div class="form-grid"><label>District logo (PNG, JPG, WebP; max 2 MB)<input id="brand-upload" type="file" accept="image/png,image/jpeg,image/webp"></label>
+  <div><img id="brand-preview" src="/api/branding/logo" alt="Active district logo" class="brand-preview"><div class="actions"><button id="brand-reset" class="secondary-btn" type="button">Restore GMCS logo</button></div></div></div>
+  <p class="caption" id="branding-status" role="status"></p>
+</section>
+<section class="panel" aria-label="NOC Internet egress diagnostics">
+  <h2>Outside / NOC Internet egress test</h2>
+  <p>Measures DNS, HTTPS connection time, small download and upload samples from <strong>this NOC VM</strong> to Cloudflare's public edge, not from each school client. This is a bounded sample, not a full ISP line-rate test. One run district-wide every 2 minutes.</p>
+  <div class="actions"><button id="egress-run" class="secondary-btn" type="button">Run VM → Internet test</button><button id="egress-refresh" class="secondary-btn" type="button">Refresh history</button></div>
+  <p id="egress-result" class="caption" role="status">Not tested from this browser.</p>
+  <div class="table-scroll"><table><thead><tr><th>TIME (UTC)</th><th>STATUS</th><th>DNS ms</th><th>TLS ms</th><th>↓ Mbps</th><th>↑ Mbps</th></tr></thead><tbody id="egress-rows"></tbody></table></div>
+</section>
 <section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
 <section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
 <div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th></tr></thead><tbody id="rows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>

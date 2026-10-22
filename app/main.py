@@ -25,6 +25,9 @@ from .database import (admin_blocked, admin_failure, admin_success, connect, cre
 from .emailer import send_result, send_client_result
 from .admin_auth import COOKIE_NAME, SESSION_SECONDS, new_session as new_admin_session, find_session, revoke_session
 from .client_email import claim_email, EmailClaimError
+from .branding_config import (DEFAULT_BRAND, init_branding, read_branding, write_branding,
+                              read_logo, store_logo, clear_logo)
+from .external_diag import init_external, history as egress_history, run_external
 from .identity import IdentityMatcher
 from .management import (SMTPForm, CSVForm, AgentForm, setup_managed, load_smtp,
                          smtp_public_config, save_smtp, put_mappings, list_agents,
@@ -118,6 +121,20 @@ class ClientEmailRequest(BaseModel):
     token: str = Field(min_length=30, max_length=150)
 
 
+class BrandingForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    org_name: str = Field(min_length=1, max_length=60)
+    site_name: str = Field(min_length=1, max_length=90)
+    tagline: str = Field(min_length=1, max_length=80)
+    heading: str = Field(min_length=1, max_length=90)
+    description: str = Field(min_length=1, max_length=320)
+
+
+class BrandingLogo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    png_data: str = Field(min_length=100, max_length=650000)
+
+
 class Report(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=30, max_length=150)
@@ -187,6 +204,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and 1 <= settings.max_active_per_vlan <= settings.max_active_tests <= 100):
         raise RuntimeError("Invalid session limits")
     init_db(settings.db_path)
+    init_branding(settings.db_path)
+    init_external(settings.db_path)
     managed = setup_managed(settings.db_path, settings.mapping_path, settings.agents_path)
     mapping = IdentityMatcher.from_csv(managed['mappings'])
     agents = Agents(str(managed['agents']))
@@ -340,6 +359,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    @app.get('/api/branding')
+    def public_branding():
+        return read_branding(settings.db_path)
+
+    @app.get('/api/branding/logo')
+    def public_logo():
+        logo = read_logo(settings.db_path)
+        if logo:
+            return Response(logo, media_type='image/png', headers={'Content-Disposition':'inline'})
+        return FileResponse(APP_ROOT / 'static' / 'gmcs-logo.png', media_type='image/png')
+
+    @app.get('/api/admin/branding', dependencies=[Depends(require_admin)])
+    def admin_branding():
+        return read_branding(settings.db_path)
+
+    @app.put('/api/admin/branding', dependencies=[Depends(require_admin)])
+    def admin_update_branding(form: BrandingForm):
+        fields = {k: v.strip() for k, v in form.model_dump().items()}
+        if any(not v or any(ord(ch) < 32 or ord(ch) == 127 for ch in v) for v in fields.values()):
+            raise HTTPException(422, 'Branding must contain printable, nonempty text only')
+        return write_branding(settings.db_path, fields)
+
+    @app.put('/api/admin/branding/logo', dependencies=[Depends(require_admin)])
+    def admin_update_logo(form: BrandingLogo):
+        try:
+            store_logo(settings.db_path, form.png_data)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        return {'status':'saved', 'custom_logo':True}
+
+    @app.delete('/api/admin/branding/logo', dependencies=[Depends(require_admin)])
+    def admin_clear_logo():
+        clear_logo(settings.db_path)
+        return {'status':'restored','custom_logo':False}
+
+    @app.get('/api/admin/diagnostics/egress', dependencies=[Depends(require_admin)])
+    def admin_egress_history():
+        return {'point': 'GMCS NOC speed-test VM → Cloudflare HTTPS',
+                'samples': egress_history(settings.db_path)}
+
+    @app.post('/api/admin/diagnostics/egress', dependencies=[Depends(require_admin)])
+    def admin_run_egress(request: Request):
+        # This runs from the VM, not the end user's browser or each school's WAN path.
+        result = run_external(settings.db_path, get_ip(request))
+        if result['status'] == 'cooldown':
+            raise HTTPException(429, 'A district egress test ran recently. Retry after '+
+                                str(result['retry_after_seconds'])+' seconds')
+        return result
 
     @app.get("/api/identity")
     def identity(request: Request):

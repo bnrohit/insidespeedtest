@@ -210,11 +210,24 @@ The `--apply` command stops/masks the **Avahi daemon and socket** when present a
 Finally perform an **authorized external vantage-point scan** from a separate VLAN: check HTTPS/443, HTTP/8080 blocked externally, UDP/5353 absent, and any Nessus Bonjour findings. For UDP a generic port scanner can report `open|filtered` inconclusively; absence of a listening process and lack of mDNS responses from the scanner segment are stronger evidence. Nessus can report other vulnerabilities despite these controls, so review and patch findings continuously.
 
 
-## Client branding
+## District branding (admin only) and external Internet diagnostics
 
-The public speed-test page now displays the official GMCS district logo by default.
-Users can click **Upload logo** to display a PNG/JPEG/WebP logo (up to 2 MB) on
-their own device. The file is converted to PNG and stored only in the browser's
-`localStorage`—**no client-supplied image reaches the server or changes the logo
-for other users**. Use **Restore GMCS logo** to return to the default. Private
-network, Nginx, SMTP and admin settings remain unchanged during the safe upgrade.
+Branding is controlled **only in `/admin`** (authenticated admin cookie, CSRF and network allowlist):
+organization name (default **GMCS**), tab title, subtitle, heading, description and
+shared PNG logo. A signed-in admin can upload a 2 MB-or-smaller PNG/JPEG/WebP,
+which the browser converts to a bounded PNG, or restore the bundled district logo.
+The settings and logo are stored in the **existing SQLite data volume** so upgrades
+and container recreations preserve them. Regular school visitors can only read
+`/api/branding` and `/api/branding/logo`. The previous browser-only personal
+logo picker was intentionally **removed**.
+
+Three paths are deliberately kept distinct:
+1. Existing internal browser throughput test: school device → GMCS NOC VM (`10.250.31.192`).
+2. External speed test link: school device → third-party Internet test in a new tab.
+3. Admin-only NOC egress check: NOC VM → Cloudflare edge over verified HTTPS
+   with 4 MiB down, 1 MiB up, DNS/TLS time and a two-minute district-wide limit.
+
+The bounded egress probe is diagnostic only; it cannot establish the throughput
+of a particular school's ISP uplink or prove traversal of either Nexus core.
+External service reachability and egress filtering can affect results. See
+`docs/GMCS-V5-DEPLOY.md` for deployment and security details.

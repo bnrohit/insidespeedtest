@@ -22,14 +22,14 @@ else
 fi
 # Check source revision and review if desired.
 git -C insidespeedtest-upstream log -1 --oneline
-# Upgrade only 12 app files; auto-backup the live database and old source.
+# Upgrade only the audited app files; auto-backup the live database and old source.
 sudo bash /home/rohith/insidespeedtest-upstream/deploy/gmcs-safe-upgrade.sh
 ```
 
 The upgrade script:
 1. Resolves the **exact existing** Compose files from the running `gmcs-inside-speed-test` container labels.
 2. Creates a source backup and a SQLite online backup (works even during a container restart loop).
-3. Replaces only 12 versioned `app/` source/static files using permission `0644`; fixes the root-owned `0600` permission issue from the first v5 installer.
+3. Replaces only the audited versioned `app/` source/static files using permission `0644`; fixes the root-owned `0600` permission issue from the first v5 installer.
 4. Rebuilds only `gmcs-inside-speed-test` and checks both localhost FastAPI `/healthz` and HTTPS Nginx on port `18443`.
 5. Verifies byte-for-byte preservation of `.env`, private network/agent mapping files, and `deploy/nginx.gmcs-alt-18443.conf`.
 6. Prints a rollback command. If build or health validation fails, attempts to restore previous source.
@@ -50,17 +50,51 @@ Security: keep private credentials, actual school mapping files, and `.env` **ou
 
 Local unit/integration tests: `python -m pytest -q` with dependencies from `requirements-dev.txt`. Passing tests do not substitute for a live SMTP relay and client-browser test on the Debian host.
 
-## Client logo upload (GMCS branding update)
+## Admin-only district branding and Internet-path comparison (v6)
 
-The client-facing homepage now displays the supplied Gallup-McKinley County Schools
-logo by default. Every client may choose **Upload logo**, select a PNG/JPEG/WebP
-image up to 2 MB, and restore the GMCS logo using **Restore GMCS logo**. Images are
-converted in the browser into a small PNG; only that browser stores the image in
-`localStorage`. No image is uploaded to the server, other browsers do not see it,
-and uploads never alter official GMCS or other clients' branding.
+Visitors cannot personalize the production website. Only signed-in, approved-network admins
+may upload or restore the logo, change the organization name (default `GMCS`), change
+browser title, organization subtitle, main heading, and description. Changes are
+stored in the **existing results SQLite volume** in the `site_branding` table and
+immediately become visible to all clients on refresh. The supplied GMCS PNG is the
+fallback. The admin browser converts PNG/JPEG/WebP images to a small safe PNG, and
+the server enforces a 450 KB PNG/1200x600 ceiling; arbitrary SVG or HTML is not accepted.
+No additional externally writable asset directory exists. Security relies on existing
+admin cookie, same-origin and CSRF enforcement; public clients have read-only access
+through `/api/branding` and `/api/branding/logo`.
 
-To upgrade a running customized GMCS installation, use the same separate checkout
-plus `sudo bash .../deploy/gmcs-safe-upgrade.sh` described above. This revision
-adds only `app/static/branding.js` and `app/static/gmcs-logo.png` to the audited
-file allowlist. Existing private IP mappings, Nginx rules, SMTP, `.env`, and Compose
-overrides are neither imported from GitHub nor overwritten.
+New **separate measurement points**:
+- **Client → GMCS NOC VM:** existing internal throughput/latency measurement from
+  the school client to `10.250.31.192` (retained unchanged).
+- **Client → Internet (outside GMCS):** the client-facing **External Internet test**
+  link opens `https://speed.cloudflare.com/` in a new browser tab. This tests the
+  client's own direct egress path through Cloudflare's service; the provider's
+  results are not silently imported, stored or claimed as GMCS server measurements.
+- **GMCS NOC VM → Internet:** logged-in admins can run an on-demand bounded HTTPS
+  test against a fixed trusted public host (`speed.cloudflare.com`) with **4 MiB
+  download and 1 MiB upload**, DNS resolution and TLS connection timing. DNS must
+  resolve to globally routable addresses and connections pin to those IPs while
+  validating the hostname certificate; redirects and arbitrary user-supplied
+  destinations are never followed. Runs are limited to **one district-wide every
+  120 seconds** and stored in `external_checks`, which is included in DB backups.
+  These small sample Mbps readings are **NOT accurate gigabit/line-rate benchmarks**
+  and do not prove the traffic path through a specific Nexus switch or firewall.
+  A blocked or rate-limited external service is displayed as a failed probe, not zero
+  Internet throughput. Test output depends on firewall/proxy egress policies.
+
+**Production upgrade:** from `/home/rohith` use the existing
+`insidespeedtest-upstream` separate checkout and `git pull --ff-only origin main`,
+then `sudo bash insidespeedtest-upstream/deploy/gmcs-safe-upgrade.sh`.
+The safe upgrade installs only the explicitly audited `app/` files; it does not
+copy `.env`, managed inventory, SMTP, Compose, Nginx, or private IP mappings.
+It backs up existing SQLite and source before a single-backend rebuild. Verify
+`/healthz`, website `HTTP 200`, and the four current Nginx admin CIDRs.
+
+**Rollback** is printed by the production upgrade script and restores the
+previous source while leaving the persistent database volume intact. The new
+SQLite tables are backward-compatible with the prior application version.
+
+**Live tests:** sign in at `/admin`, change organization name, upload and reset a
+logo, sign out, verify clients cannot edit; run a VM → Cloudflare egress probe from
+an approved admin IP. A browser's direct-Internet results and the VM egress
+results will differ when network paths and ISPs differ.

@@ -23,6 +23,7 @@ FILES=(
  app/static/admin.html app/static/admin.js app/static/index.html
  app/static/login.html app/static/login.js app/static/style.css app/static/test.js
  app/static/branding.js app/static/gmcs-logo.png
+ app/branding_config.py app/external_diag.py
 )
 for rel in "${FILES[@]}"; do
   [[ -f "$SOURCE/$rel" && "$rel" == app/* ]] || { echo "Missing safe source file: $rel" >&2; exit 1; }
@@ -142,7 +143,7 @@ if ! (cd "$ROOT" && sha256sum -c "$BACKUP/private.sha256" >/dev/null); then
   exit 1
 fi
 
-echo "SUCCESS: GMCS speed-test client branding upgrade and HTTPS website healthy."
+echo "SUCCESS: GMCS speed-test admin branding + NOC Internet diagnostics upgrade healthy."
 echo "GitHub commit: $SOURCE_REV"
 echo "Private IP, Nginx and SMTP files unchanged."
 echo "Database backup: $BACKUP/results-before.sqlite3"

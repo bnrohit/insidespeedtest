@@ -156,11 +156,81 @@ el('append-mapping').addEventListener('click',()=>{
   editor.focus();
 });
 
+// Website branding: authenticated admin only; uses the same CSRF token as other settings.
+async function loadBranding(){
+  const b=await req('/api/admin/branding');
+  for(const [id,val] of [['brand-org',b.org_name],['brand-site',b.site_name],
+    ['brand-tagline',b.tagline],['brand-heading',b.heading],['brand-description',b.description]])el(id).value=val;
+  el('brand-preview').src='/api/branding/logo?ts='+Date.now();
+  el('branding-status').textContent=b.custom_logo?'Custom logo active for all visitors.':'Official GMCS logo active.';
+}
+el('brand-save').addEventListener('click',async()=>{
+  const button=el('brand-save');button.disabled=true;
+  try{
+    await postConfig('/api/admin/branding','PUT',{
+      org_name:el('brand-org').value,site_name:el('brand-site').value,
+      tagline:el('brand-tagline').value,heading:el('brand-heading').value,
+      description:el('brand-description').value});
+    el('branding-status').textContent='Site name and text saved for all clients. Refresh the speed-test page to view.';
+  }catch(e){el('branding-status').textContent='Save failed: '+e.message;}
+  finally{button.disabled=false;}
+});
+el('brand-upload').addEventListener('change',async()=>{
+  const file=el('brand-upload').files?.[0];el('brand-upload').value='';if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024||file.size<1){
+    el('branding-status').textContent='Select a PNG, JPEG or WebP smaller than 2 MB.';return;
+  }
+  let temp;
+  try{
+    temp=URL.createObjectURL(file);const image=new Image();image.src=temp;await image.decode();
+    if(image.naturalWidth>4096||image.naturalHeight>4096||image.naturalWidth*image.naturalHeight>12000000)throw Error('Image dimensions too large');
+    const scale=Math.min(480/image.naturalWidth,220/image.naturalHeight,1);
+    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(scale*image.naturalWidth));canvas.height=Math.max(1,Math.round(scale*image.naturalHeight));
+    canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+    const data=canvas.toDataURL('image/png');
+    if(data.length>620000)throw Error('Processed logo exceeds the 450 KB server limit');
+    await postConfig('/api/admin/branding/logo','PUT',{png_data:data});
+    el('brand-preview').src='/api/branding/logo?ts='+Date.now();
+    el('branding-status').textContent='District logo saved for all clients.';
+  }catch(e){el('branding-status').textContent='Logo not saved: '+e.message;}
+  finally{if(temp)URL.revokeObjectURL(temp);}
+});
+el('brand-reset').addEventListener('click',async()=>{
+  if(!confirm('Restore the official GMCS logo for every user?'))return;
+  try{
+    const r=await fetch('/api/admin/branding/logo',{method:'DELETE',headers:{'X-CSRF-Token':csrfToken}});
+    if(!r.ok)throw Error('HTTP '+r.status);
+    el('brand-preview').src='/api/branding/logo?ts='+Date.now();
+    el('branding-status').textContent='Official GMCS logo restored for all users.';
+  }catch(e){el('branding-status').textContent='Reset failed: '+e.message;}
+});
+async function refreshEgress(){
+  try{
+    const x=await req('/api/admin/diagnostics/egress');el('egress-rows').replaceChildren();
+    for(const r of x.samples){const tr=document.createElement('tr');
+      for(const v of [new Date(r.at*1000).toISOString().replace('T',' ').slice(0,19),r.status,r.dns_ms,r.tls_ms,r.download_mbps,r.upload_mbps])cell(tr,v);el('egress-rows').append(tr);
+    }
+    if(!x.samples.length)el('egress-result').textContent='No VM Internet checks recorded yet.';
+  }catch(e){el('egress-result').textContent='Could not load checks: '+e.message;}
+}
+el('egress-refresh').addEventListener('click',refreshEgress);
+el('egress-run').addEventListener('click',async()=>{
+  const button=el('egress-run');button.disabled=true;el('egress-result').textContent='Checking NOC VM Internet egress…';
+  try{
+    const result=await postConfig('/api/admin/diagnostics/egress','POST',{});
+    el('egress-result').textContent=result.status==='ok'
+      ? `NOC VM → ${result.target}: DNS ${result.dns_ms} ms, HTTPS ${result.tls_ms} ms, ↓ ${result.download_mbps} Mbps, ↑ ${result.upload_mbps} Mbps (4 MiB down / 1 MiB up).`
+      : 'Internet test failed: '+result.detail;
+    await refreshEgress();
+  }catch(e){el('egress-result').textContent='Test not accepted: '+e.message;}
+  finally{button.disabled=false;}
+});
+
 async function initializeAdmin(){
   try{
     const session=await req('/api/admin/session');
     csrfToken=session.csrf_token;
-    await Promise.all([refresh(),loadConfig()]);
+    await Promise.all([refresh(),loadConfig(),loadBranding(),refreshEgress()]);
   }catch(err){
     window.location.replace('/admin');
   }
