@@ -41,7 +41,9 @@ def test_linux_direct_install_files_present_and_safe():
     base=Path(__file__).resolve().parents[1]/'integrations/linux-snmp-direct'
     script=(base/'install.sh').read_text()
     assert 'systemctl daemon-reload' in script
-    assert 'systemctl enable --now gmcs-speedtest-direct.timer' not in script
+    # The installer merely PRINTS how to enable it; it must not run that command.
+    installer_commands=script.split("cat <<'EOF'")[0]
+    assert 'systemctl enable --now gmcs-speedtest-direct.timer' not in installer_commands
     assert 'snmpd.conf' in script
     assert (base/'gmcs-speedtest-direct.timer').is_file()
     assert (base/'gmcs-speedtest-direct.service').is_file()
