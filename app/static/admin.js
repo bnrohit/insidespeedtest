@@ -295,8 +295,8 @@ el('diag-open').addEventListener('click',()=>{
 // Authenticated, read-only visualization: no remote commands and no user-defined targets.
 const routerSvgNS='http://www.w3.org/2000/svg';
 function routerSvg(name,attr={}){const n=document.createElementNS(routerSvgNS,name);for(const [k,v] of Object.entries(attr))n.setAttribute(k,String(v));return n;}
-function routerDraw(result){
-  const root=el('router-graph');root.replaceChildren();
+function routerDraw(result, rootId='router-graph', capped=true){
+  const root=el(rootId);root.replaceChildren();
   const data=result.points||[];
   if(!data.length){root.textContent='No hourly measurements for this time range.';return;}
   const svg=routerSvg('svg',{viewBox:'0 0 900 250',role:'img','aria-label':'Download teal, upload blue; time left to right'});
@@ -330,7 +330,7 @@ function routerDraw(result){
     t.textContent=label+' '+new Date(p*1000).toISOString().slice(0,16).replace('T',' ');svg.append(t);
   }
   root.append(svg);
-  const legend=document.createElement('p');legend.className='caption';legend.textContent='Teal = download, blue = upload. Samples are throughput capped on the VyOS test.';root.append(legend);
+  const legend=document.createElement('p');legend.className='caption';legend.textContent=capped?'Teal = download, blue = upload. These are capped VyOS router measurements.':'Teal = download, blue = upload. These are school-host HTTPS measurements (not the router or public Internet).';root.append(legend);
 }
 async function loadRouterSites(){
   try {
@@ -363,3 +363,36 @@ async function loadRouterGraph(){
 el('router-school').addEventListener('change',loadRouterGraph);
 el('router-range').addEventListener('change',loadRouterGraph);
 el('router-refresh').addEventListener('click',loadRouterSites);
+
+
+// Separate agent path. Never intermingle these HTTPS reports with VyOS router results.
+async function loadSchoolAgents(){
+  try{
+    const obj=await req('/api/admin/school-agents');
+    const select=el('school-agent-select');const old=select.value;
+    select.replaceChildren();
+    const table=el('school-agent-rows');table.replaceChildren();
+    for(const a of obj.agents){
+      const option=document.createElement('option');option.value=a.agent_id;option.textContent=a.agent_id+(a.school?' — '+a.school:'');select.append(option);
+      const tr=document.createElement('tr');
+      for(const v of [a.agent_id,a.school,a.completed_at?new Date(a.completed_at*1000).toISOString().slice(0,16):null,a.status,a.client_ip,a.download_mbps,a.upload_mbps,a.latency_ms])cell(tr,v);
+      table.append(tr);
+    }
+    if(obj.agents.some(a=>a.agent_id===old))select.value=old;
+    if(!obj.agents.length){el('school-agent-status').textContent='No registered school-side agent. Add a school cache agent under Configuration center, then install its hourly timer at that school.';el('school-agent-graph').replaceChildren();return;}
+    await loadSchoolAgentGraph();
+  }catch(e){el('school-agent-status').textContent='Unable to list school agents: '+e.message;}
+}
+async function loadSchoolAgentGraph(){
+  const id=el('school-agent-select').value;
+  if(!id){el('school-agent-graph').replaceChildren();return;}
+  try{
+    const result=await req('/api/admin/school-agents/'+encodeURIComponent(id)+'?window='+encodeURIComponent(el('school-agent-period').value));
+    el('school-agent-status').textContent=`${id}: ${result.points.length} chart buckets; source is that school's agent host, not the NOC's SSH router collector.`;
+    routerDraw(result,'school-agent-graph',false);
+  }catch(e){el('school-agent-status').textContent='Agent history unavailable: '+e.message;}
+}
+el('school-agent-select').addEventListener('change',loadSchoolAgentGraph);
+el('school-agent-period').addEventListener('change',loadSchoolAgentGraph);
+el('school-agent-refresh').addEventListener('click',loadSchoolAgents);
+loadSchoolAgents();

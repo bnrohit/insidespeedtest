@@ -1,11 +1,11 @@
 [Unit]
-Description=Run a GMCS school network speed test every morning (staggered)
+Description=Hourly on-site GMCS HTTPS speed test, independent of VyOS NOC collector
 
 [Timer]
-OnCalendar=*-*-* 06:15:00
-RandomizedDelaySec=90min
+OnCalendar=*-*-* *:05:00
+RandomizedDelaySec=25min
 FixedRandomDelay=true
-Persistent=true
+Persistent=false
 AccuracySec=1min
 Unit=gmcs-speedtest.service
 

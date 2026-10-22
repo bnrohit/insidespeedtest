@@ -23,7 +23,7 @@ FILES=(
  app/static/admin.html app/static/admin.js app/static/index.html
  app/static/login.html app/static/login.js app/static/style.css app/static/test.js
  app/static/branding.js app/static/gmcs-logo.png
- app/branding_config.py app/external_diag.py app/diagnostics.py app/router_history.py
+ app/branding_config.py app/external_diag.py app/diagnostics.py app/router_history.py app/school_agent_history.py
  app/static/gmcs-diagnostics-windows.ps1 app/static/gmcs-diagnostics-macos.sh
 )
 for rel in "${FILES[@]}"; do

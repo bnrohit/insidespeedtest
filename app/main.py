@@ -28,7 +28,8 @@ from .client_email import claim_email, EmailClaimError
 from .branding_config import (DEFAULT_BRAND, init_branding, read_branding, write_branding,
                               read_logo, store_logo, clear_logo)
 from .external_diag import init_external, history as egress_history, run_external
-from .router_history import initialize as init_router_history, latest as latest_routers, latest_site, trend as router_trend
+from .router_history import initialize as init_router_history, latest as latest_routers, latest_site, trend as router_trend, WINDOWS as GRAPH_WINDOWS
+from .school_agent_history import initialize as init_school_history, listed as listed_school_agents, most_recent as recent_school_agent, graph as school_agent_graph
 from .diagnostics import (init_diagnostics, record_browser, submit_advanced, fetch_report,
                           validate_advanced, issue_upload_code, submit_paired)
 from .identity import IdentityMatcher
@@ -238,6 +239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     init_external(settings.db_path)
     init_diagnostics(settings.db_path)
     init_router_history(settings.db_path)
+    init_school_history(settings.db_path)
     managed = setup_managed(settings.db_path, settings.mapping_path, settings.agents_path)
     mapping = IdentityMatcher.from_csv(managed['mappings'])
     agents = Agents(str(managed['agents']))
@@ -452,6 +454,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return router_trend(settings.db_path, site.upper(), window)
         except ValueError:
             raise HTTPException(400, 'Invalid school code or chart window')
+
+    @app.get('/api/admin/school-agents', dependencies=[Depends(require_admin)])
+    def admin_school_agents():
+        return {'agents': listed_school_agents(settings.db_path, list(app.state.agents.rows)),
+                'windows': list(GRAPH_WINDOWS)}
+
+    @app.get('/api/admin/school-agents/{agent_id}', dependencies=[Depends(require_admin)])
+    def admin_school_agent_graph(agent_id: str, window: str = 'day'):
+        if agent_id not in app.state.agents.rows:
+            raise HTTPException(404, 'Agent not registered')
+        try:
+            return school_agent_graph(settings.db_path, agent_id, window)
+        except ValueError:
+            raise HTTPException(400, 'Invalid agent ID or chart window')
+
+    @app.get('/api/monitoring/school-agent/{agent_id}')
+    def librenms_school_agent(agent_id: str, request: Request):
+        # Separate read-only monitoring credential; school agents NEVER see it.
+        import hmac
+        if not secure_transport(request):
+            raise HTTPException(403, 'HTTPS required')
+        get_ip(request)
+        p = Path(settings.db_path).parent / 'gmcs-monitoring.token'
+        try:
+            expected=p.read_text(encoding='utf-8').strip()
+        except OSError:
+            raise HTTPException(503, 'Monitoring integration not configured')
+        header=request.headers.get('authorization','')
+        provided=header[7:] if header.startswith('Bearer ') else ''
+        if len(expected)<32 or not hmac.compare_digest(expected,provided):
+            raise HTTPException(401, 'Monitoring token required')
+        if not AGENT_ID_RE.fullmatch(agent_id):
+            raise HTTPException(400, 'Invalid agent ID')
+        if agent_id not in app.state.agents.rows:
+            raise HTTPException(404, 'Unregistered agent')
+        data=recent_school_agent(settings.db_path,agent_id)
+        if data is None:
+            raise HTTPException(404, 'No measurement yet')
+        # Deliberately omit hostname and private IP from the read-only metrics API.
+        return {'agent_id':agent_id,'at':data['completed_at'], 'status':data['status'],
+                'school':data['school'], 'down_mbps':data['download_mbps'],
+                'up_mbps':data['upload_mbps'],'latency_ms':data['latency_ms'],
+                'jitter_ms':data['jitter_ms'],'loss_pct':data['packet_loss_pct']}
 
     @app.get('/api/monitoring/router-hourly/{site}')
     def librenms_site(site: str, request: Request):

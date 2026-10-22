@@ -33,6 +33,18 @@
   <div id="router-graph" class="router-graph" role="img" aria-label="School router upload and download throughput over time"></div>
   <div class="table-scroll"><table><thead><tr><th>SITE</th><th>LAST SAMPLE (UTC)</th><th>STATUS</th><th>ROUTER IP</th><th>↓ CAPPED Mbps</th><th>↑ CAPPED Mbps</th><th>LATENCY</th></tr></thead><tbody id="router-rows"></tbody></table></div>
 </section>
+<section class="panel" aria-label="Independent hourly school-agent measurements">
+  <h2>Hourly school-host agents → GMCS NOC</h2>
+  <p>Measurements originate <strong>from a dedicated Linux agent physically at each school</strong> over HTTPS, using its own per-device credential. These are separate from the central VyOS SSH/iperf3 measurements above. LibreNMS reads their latest cached result and graphs it without generating test traffic.</p>
+  <div class="actions">
+    <label>School agent <select id="school-agent-select"><option value="">Choose agent</option></select></label>
+    <label>Period <select id="school-agent-period"><option value="6h">6 hours</option><option value="day" selected>Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option><option value="2years">Two years</option></select></label>
+    <button class="secondary-btn" id="school-agent-refresh" type="button">Refresh agents</button>
+  </div>
+  <p class="caption" id="school-agent-status" role="status">No school-host results loaded.</p>
+  <div id="school-agent-graph" class="router-graph" role="img" aria-label="School device HTTPS throughput history"></div>
+  <div class="table-scroll"><table><thead><tr><th>AGENT</th><th>SCHOOL</th><th>LAST SAMPLE (UTC)</th><th>STATUS</th><th>CLIENT IP</th><th>↓ Mbps</th><th>↑ Mbps</th><th>LATENCY</th></tr></thead><tbody id="school-agent-rows"></tbody></table></div>
+</section>
 <section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
 <section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
 <div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th><th>DIAGNOSTICS</th></tr></thead><tbody id="rows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>

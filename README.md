@@ -247,3 +247,16 @@ Each completed browser speed test now attaches small browser/network context and
 ### Windows diagnostics: client-approved direct upload
 
 After a browser speed test, clients may explicitly create a 10-minute, one-use upload code and execute the GMCS-approved signed Windows diagnostics script. The report is saved locally and, after confirming submission, sent directly to the matching admin troubleshooting result. A normal download never auto-runs, and unsigned downloaded scripts are **not** guaranteed compatible with Smart App Control. Trusted signing and a Windows-trusted HTTPS certificate are required for secure deployment. See [Client Troubleshooting / Smart App Control](docs/GMCS-CLIENT-TROUBLESHOOTING.md).
+
+
+### Independent school-host hourly speed tests + LibreNMS (v10)
+
+A **physical/VM Linux agent at each enrolled school**, not the central VyOS SSH collector, runs
+its own small authenticated HTTPS test against GMCS at `10.250.31.192:18443` once per hour.
+The existing `agent/school_agent.py` and `agent/install.sh` support this. The timer is now hourly
+(minute :05 plus stable random stagger). Enable it at each approved school only after
+source-IP-bound enrollment and certificate validation. GMCS provides two-year-range graphs
+under a **separate School Agents panel**; LibreNMS monitors the cached per-agent metrics using
+`integrations/librenms/check_gmcs_school_agent.py`, and maintains independent service graphs.
+Do not put LibreNMS API secrets on school agents or confuse these with central router/iperf tests.
+See [`docs/GMCS-SCHOOL-AGENT-HOURLY-LIBRENMS.md`](docs/GMCS-SCHOOL-AGENT-HOURLY-LIBRENMS.md).
