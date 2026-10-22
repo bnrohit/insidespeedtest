@@ -83,3 +83,31 @@ def test_librenms_plugin_outage_and_perfdata(tmp_path,monkeypatch):
     assert plugin.check('CDE;rm','https://gmcs.example',str(token),now=NOW)[0]==3
     assert plugin.check('CDE','http://gmcs.example',str(token),now=NOW)[0]==3
     assert plugin.check('CDE','https://gmcs.example',str(token),now=NOW+3*3600)[0]==3
+
+
+def test_admin_router_graph_and_monitoring_token(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.main import Settings, create_app
+    mapping=tmp_path/'networks.csv'
+    mapping.write_text('scope,school,vlan,cidr,label\nschool,CDE,,10.21.0.0/20,Campus\n')
+    settings=Settings(db_path=str(tmp_path/'results.sqlite3'),mapping_path=str(mapping),
+        admin_username='gmcsadmin',admin_password='SEPARATE_LONG_TEST_ONLY_PASSWORD',
+        admin_client_cidrs='10.0.0.0/8')
+    app=create_app(settings)
+    user=TestClient(app,base_url='https://speedtest.test',client=('10.21.1.8',1234))
+    h.import_rows(settings.db_path,[row()],NOW,30)
+    assert user.get('/api/admin/router-hourly').status_code==401
+    assert user.get('/api/monitoring/router-hourly/CDE').status_code==503
+    (tmp_path/'gmcs-monitoring.token').write_text('T'*48)
+    assert user.get('/api/monitoring/router-hourly/CDE').status_code==401
+    ok=user.get('/api/monitoring/router-hourly/CDE',headers={'Authorization':'Bearer '+'T'*48})
+    assert ok.status_code==200
+    assert ok.json()['site']=='CDE'
+    assert ok.json()['down_mbps']==28.4
+    assert 'token' not in ok.text
+    insecure=TestClient(app,base_url='http://speedtest.test',client=('10.21.1.8',1234))
+    assert insecure.get('/api/monitoring/router-hourly/CDE',headers={'Authorization':'Bearer '+'T'*48}).status_code==403
+    assert user.post('/api/admin/login',json={'username':'gmcsadmin','password':settings.admin_password}).status_code==204
+    assert user.get('/api/admin/router-hourly').status_code==200
+    assert user.get('/api/admin/router-hourly/CDE?window=week').status_code==200
+    assert user.get('/api/admin/router-hourly/CDE?window=decade').status_code==400
