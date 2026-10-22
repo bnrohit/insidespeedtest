@@ -72,6 +72,11 @@ def measure(config: dict, script=DEFAULT_AGENT, run_command=subprocess.run) -> d
         raw=json.loads(done.stdout.strip().splitlines()[-1])
         if raw.get('agent_id')!=config['agent_id']:
             return {'status':'invalid'}
+        # A server acknowledgement is emitted only after this agent completed both
+        # real HTTP transfers, latency probes and the authenticated result upload.
+        receipt = raw.get('result_id')
+        if type(receipt) not in (str, int) or not str(receipt).strip():
+            return {'status':'invalid'}
         fields={
             'download_mbps':number(raw.get('download_mbps')),
             'upload_mbps':number(raw.get('upload_mbps')),
@@ -81,7 +86,7 @@ def measure(config: dict, script=DEFAULT_AGENT, run_command=subprocess.run) -> d
         }
         if any(x is None for x in fields.values()):
             return {'status':'invalid'}
-        return {'status':'ok',**fields}
+        return {'status':'ok','source':'vyos-local-gmcs-https',**fields}
     except (OSError,subprocess.TimeoutExpired,ValueError,UnicodeError,KeyError,IndexError,TypeError):
         return {'status':'failed'}
 
@@ -103,8 +108,9 @@ def persist(path:Path,content:dict):
 
 def run(config_path:Path,cache_path:Path):
     config=validated(json.loads(config_path.read_text(encoding='utf-8')))
-    now=int(time.time())
     measured=measure(config['inside'])
+    # Timestamp the completed measurement, not the beginning of the test.
+    now=int(time.time())
     persist(cache_path,{'version':1,'at':now,'inside':measured})
     print(json.dumps({'at':now,'inside_status':measured['status']},separators=(',',':')))
     return 0 if measured['status']=='ok' else 1

@@ -33,7 +33,7 @@ sudo /config/scripts/gmcs-vyos-speedtest/runner.sh
 sudo /config/user-data/gmcs-vyos-speedtest/extend.py
 ```
 
-The first execution sends a bounded **24 MiB download / 8 MiB upload** to the GMCS HTTPS service, measures speeds/ping/jitter/loss *from the router*, and saves only safe numeric metrics. The SNMP extension **only reads cache**; it never runs a test. If the test fails or its cache becomes older than 150 minutes, the extend produces NULL measurements, not invented zero speeds.
+The first execution sends a bounded **24 MiB download / 8 MiB upload** to the GMCS HTTPS service, measures speeds/ping/jitter/loss *from the router*, and saves only safe numeric metrics. The collector requires the authenticated **completed-test result receipt** and marks a successful sample `source=vyos-local-gmcs-https`. The SNMP extension **only reads cache**; it never runs a test. If the test fails, has no receipt, has another source, or its cache becomes older than **90 minutes**, the extend produces NULL measurements, not invented zero speeds.
 
 When a pilot router returns valid numbers, configure the SNMP extension and independent hourly VyOS scheduler (choose staggered minutes for each school, **do not enable two different speed-test tasks on the same router**):
 
@@ -79,6 +79,12 @@ sudo install -m 0644 "$SRC/includes/html/graphs/application/gmcs_vyos_speedtest_
 Validate all new `.inc.php` files with `php -l`. Ensure Applications discovery/polling is enabled on this router, then discover and poll that single device using the commands appropriate to your LibreNMS installation, e.g. `sudo -u librenms ./lnms device:discover 10.7.8.10` and `sudo -u librenms ./lnms device:poll 10.7.8.10` when run inside LibreNMS root (use actual device hostname/ID). An existing router device such as 7613 / `10.7.8.10` is **not proof** that the correct agent is enrolled or installed on it.
 
 Inspect **Apps → GMCS VyOS Speedtest** on the chosen device: download/upload Mbps, latency/jitter and packet-loss charts, with native LibreNMS day/week/month/year ranges. Missing cache or stale tests show gaps rather than false 0 Mbps. LibreNMS docs on SNMP-extend applications: https://docs.librenms.org/Extensions/Applications/.
+
+### What these graphs represent (not server or device status)
+
+Only `inside_down` (Mbps), `inside_up` (Mbps), `inside_ping` (ms), `inside_jitter` (ms), and `inside_loss` (%) are written to the GMCS application's RRD. These are derived from actual authenticated HTTP transfer and probe measurements *on the school VyOS router*. **No** GMCS web-server uptime/CPU/memory, SNMP reachability, router bandwidth interface counters, agent process health, HTTP response status code, or email-notification status is graphed in this Apps entry. Standard LibreNMS router health/port graphs remain separate in the device's usual sections.
+
+VyOS takes one test per hour, while LibreNMS generally polls more often. Those extra SNMP polls re-read **the most recently completed real speed-test sample**, which is held in the speed-test-only RRD until replaced by the next completed test. This is a *last hourly test* trend, **not** continuous live throughput. Failed tests write UNKNOWN so charts have gaps, never false 0 Mbps. Samples over 90 minutes old also become UNKNOWN. The RRD cannot reconstruct test measurements made before this integration was installed.
 
 ## 4. Retention and historical graphs
 

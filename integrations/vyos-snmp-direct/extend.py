@@ -14,15 +14,18 @@ FIELDS=('download_mbps','upload_mbps','latency_ms','jitter_ms','loss_pct')
 def render(path=DEFAULT, now=None):
     t=int(time.time()) if now is None else now
     result={'version':1,'error':0,'errorString':'','data':{}}
-    status='missing'; stamp=0; metrics={k:None for k in FIELDS}
+    status='missing'; stamp=0; source=''; metrics={k:None for k in FIELDS}
     try:
         data=json.loads(Path(path).read_text(encoding='utf-8'))
         if data.get('version')!=1:raise ValueError('Unknown cache version')
         stamp=int(data['at'])
         raw=data['inside']
         status=str(raw.get('status','invalid'))[:16]
-        if not -60<=t-stamp<=9000:
+        source=raw.get('source','') if status=='ok' else ''
+        if not -60<=t-stamp<=5400:
             status='stale'
+        if status=='ok' and source!='vyos-local-gmcs-https':
+            status='invalid'
         if status=='ok':
             for key in FIELDS:
                 v=raw.get(key)
@@ -33,7 +36,9 @@ def render(path=DEFAULT, now=None):
             if status!='ok':metrics={k:None for k in FIELDS}
     except (OSError,TypeError,ValueError,KeyError,json.JSONDecodeError):
         status='missing';stamp=0
-    result['data']={'status':status,'at':stamp,**metrics}
+    # Source and status are diagnostic metadata only: never RRD graph series.
+    result['data']={'status':status,'at':stamp,
+                    'source':source if status=='ok' else '',**metrics}
     return json.dumps(result,separators=(',',':'),allow_nan=False)
 
 if __name__=='__main__':
