@@ -10,9 +10,8 @@ import json
 from pathlib import Path
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
+import http.client
 import ssl
 import re
 
@@ -20,16 +19,27 @@ CODE=re.compile(r'^[A-Z0-9_-]{2,12}$')
 
 def check(site,base_url,token_file,ca_file=None,now=None):
     if not CODE.fullmatch(site):return 3,'UNKNOWN - Invalid site code'
-    if not base_url.startswith('https://') or urllib.parse.urlparse(base_url).username:
+    parts=urllib.parse.urlsplit(base_url)
+    if (parts.scheme!='https' or not parts.hostname or parts.username or
+        parts.password or parts.query or parts.fragment or parts.path not in ('','/')):
         return 3,'UNKNOWN - HTTPS endpoint required'
     try:
         token=Path(token_file).read_text(encoding='utf-8').strip()
         if len(token)<32: return 3,'UNKNOWN - Monitoring credential missing'
         ctx=ssl.create_default_context(cafile=ca_file)
-        url=base_url.rstrip('/')+'/api/monitoring/router-hourly/'+site
-        req=urllib.request.Request(url,headers={'Authorization':'Bearer '+token})
-        with urllib.request.urlopen(req,timeout=10,context=ctx) as response:
-            payload=json.load(response)
+        # Use HTTPSConnection directly: no redirects to leak the bearer token.
+        conn=http.client.HTTPSConnection(parts.hostname,parts.port or 443,timeout=10,context=ctx)
+        try:
+            conn.request('GET','/api/monitoring/router-hourly/'+site,
+                         headers={'Authorization':'Bearer '+token})
+            response=conn.getresponse()
+            if response.status!=200:
+                return 3,'UNKNOWN - Central monitoring API returned HTTP '+str(response.status)
+            raw=response.read(8193)
+            if len(raw)>8192:return 3,'UNKNOWN - Oversized monitoring response'
+            payload=json.loads(raw)
+        finally:
+            conn.close()
         if payload.get('site')!=site:return 3,'UNKNOWN - Site mismatch'
         t=int(time.time()) if now is None else now
         age=t-int(payload['at'])
@@ -45,7 +55,7 @@ def check(site,base_url,token_file,ca_file=None,now=None):
         if lat is not None:perf+=f" latency_ms={float(lat):.3f}ms;;;0;"
         if loss is not None:perf+=f" loss_pct={float(loss):.3f}%;0;100;0;100"
         return 0,f'OK - {site} router-to-NOC capped ↓{down:.2f}/↑{up:.2f} Mbps ({age//60}m old) | {perf}'
-    except (OSError,ValueError,KeyError,urllib.error.URLError,json.JSONDecodeError) as exc:
+    except (OSError,ValueError,KeyError,OverflowError,http.client.HTTPException,json.JSONDecodeError) as exc:
         return 3,'UNKNOWN - GMCS central metrics unavailable ('+type(exc).__name__+')'
 
 

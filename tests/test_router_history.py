@@ -68,16 +68,16 @@ def test_librenms_plugin_outage_and_perfdata(tmp_path,monkeypatch):
     spec=importlib.util.spec_from_file_location('plugin',Path(__file__).resolve().parents[1]/'integrations'/'librenms'/'check_gmcs_router.py')
     plugin=importlib.util.module_from_spec(spec);spec.loader.exec_module(plugin)
     token=tmp_path/'token';token.write_text('t'*48)
-    class Response:
-        def __enter__(self):return self
-        def __exit__(self,*args):pass
-        def read(self):return b''
     class FakeResponse:
-        def __enter__(self):return self
-        def __exit__(self,*args):pass
+        status=200
         def read(self,*args):return json.dumps({'site':'CDE','at':NOW,'status':'TEST_COMPLETE','down_mbps':29.4,'up_mbps':29.1,'latency_ms':1.4,'ping_loss':0}).encode()
-    # json.load() calls .read() with no arguments.
-    monkeypatch.setattr(plugin.urllib.request,'urlopen',lambda *a,**kw:FakeResponse())
+    class FakeConn:
+        def __init__(self,*args,**kwargs):pass
+        def request(self,method,path,headers):
+            assert method=='GET' and path.endswith('/CDE') and headers.get('Authorization')=='Bearer '+'t'*48
+        def getresponse(self):return FakeResponse()
+        def close(self):pass
+    monkeypatch.setattr(plugin.http.client,'HTTPSConnection',FakeConn)
     status,msg=plugin.check('CDE','https://gmcs.example',str(token),now=NOW+120)
     assert status==0 and 'download_mbps=29.400Mbps' in msg
     assert plugin.check('CDE;rm','https://gmcs.example',str(token),now=NOW)[0]==3
