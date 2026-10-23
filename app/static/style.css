@@ -27,3 +27,12 @@
 
 .diag-output{overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:420px;padding:12px;border-radius:8px;background:#091721;border:1px solid #304857;font-size:12px} .diag-finding{padding:12px;margin:10px 0;border:1px solid #344853;border-radius:8px}.diag-finding strong{display:block;margin-bottom:4px}.diag-native details{margin:8px 0}.diag-report{margin-top:15px}.diag-report h3{margin-top:20px}#client-diagnostics-panel{margin-top:18px}#diagnostic-send:disabled{opacity:.6}
 .router-graph{width:100%;min-height:210px;overflow:auto;margin:12px 0}.router-graph svg{max-width:100%;height:auto;display:block}.router-graph text{user-select:none}
+
+/* GMCS admin triage: meaningful statuses, responsive result controls. */
+.health-mark{display:inline-flex;vertical-align:middle;align-items:center;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:700;letter-spacing:0;white-space:nowrap;background:#203947;color:#bfd0d7;border:1px solid #355260}
+.health-mark[data-state="ok"]{background:#153c32;color:#a0f2d0;border-color:#277d62}
+.health-mark[data-state="issue"]{background:#482b2b;color:#ffd0bb;border-color:#9a4943}
+.health-mark[data-state="pending"]{background:#3a3524;color:#f5dfa5;border-color:#87703e}
+.triage-hint{display:inline-block;padding:2px 6px;border-radius:6px;background:#443724;color:#f3d7a0;font-size:11px;font-weight:700;cursor:help}
+.history-control{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#b5d1d7}
+.history-control select{color:#e8f5f6;background:#0b2029;border:1px solid #385d65;border-radius:7px;min-height:36px;max-width:225px;padding:5px}
