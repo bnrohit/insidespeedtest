@@ -778,34 +778,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         focus: str = Query("all", pattern="^(all|unmapped|jitter|upload|asymmetry)$"),
         sort: str = Query("newest", pattern="^(newest|jitter|upload|ratio)$")
     ):
-        # Server-side filters apply to all stored records, before the limit.
-        clauses = ["1=1"]
-        args: list = []
-        if school:
-            clauses.append("school=?")
-            args.append(school)
-        if vlan:
-            clauses.append("vlan=?")
-            args.append(vlan)
-        conditions = {
-            "unmapped": "(school='Unknown' OR vlan='Unknown')",
-            "jitter": "jitter_ms>=30",
-            "upload": "upload_mbps<10",
-            "asymmetry": "(download_mbps>=20 AND upload_mbps*4<download_mbps)",
-        }
-        if focus != "all":
-            clauses.append(conditions[focus])
-        where = " WHERE " + " AND ".join(clauses)
-        order = {
-            "newest": "id DESC",
-            "jitter": "jitter_ms DESC, id DESC",
-            "upload": "upload_mbps ASC, id DESC",
-            "ratio": "(CASE WHEN download_mbps>=20 THEN upload_mbps/download_mbps ELSE 1 END) ASC, id DESC",
-        }[sort]
+        # Every user choice is passed as a bound parameter; SQL is static.
+        # Filter all stored rows before sorting, then apply a bounded limit.
+        args = (school, school, vlan, vlan, focus, focus, focus, focus)
         with connect(settings.db_path) as con:
-            count = con.execute("SELECT COUNT(*) FROM results" + where, args).fetchone()[0]
-            rows = con.execute("SELECT * FROM results" + where
-                               + " ORDER BY " + order + " LIMIT ?", [*args, limit]).fetchall()
+            count = con.execute("""
+                SELECT COUNT(*) FROM results
+                WHERE (? IS NULL OR school=?)
+                  AND (? IS NULL OR vlan=?)
+                  AND (? <> 'unmapped' OR school='Unknown' OR vlan='Unknown')
+                  AND (? <> 'jitter' OR jitter_ms>=30)
+                  AND (? <> 'upload' OR upload_mbps<10)
+                  AND (? <> 'asymmetry' OR (download_mbps>=20 AND upload_mbps*4<download_mbps))
+            """, args).fetchone()[0]
+            rows = con.execute("""
+                SELECT * FROM results
+                WHERE (? IS NULL OR school=?)
+                  AND (? IS NULL OR vlan=?)
+                  AND (? <> 'unmapped' OR school='Unknown' OR vlan='Unknown')
+                  AND (? <> 'jitter' OR jitter_ms>=30)
+                  AND (? <> 'upload' OR upload_mbps<10)
+                  AND (? <> 'asymmetry' OR (download_mbps>=20 AND upload_mbps*4<download_mbps))
+                ORDER BY
+                  CASE WHEN ?='jitter' THEN jitter_ms END DESC,
+                  CASE WHEN ?='upload' THEN upload_mbps END ASC,
+                  CASE WHEN ?='ratio'
+                    THEN CASE WHEN download_mbps>=20 THEN upload_mbps/download_mbps ELSE 1 END
+                    END ASC,
+                  id DESC
+                LIMIT ?
+            """, (*args, sort, sort, sort, limit)).fetchall()
         return {"results": [dict(r) for r in rows], "matched_count": count,
                 "focus": focus, "sort": sort}
 
