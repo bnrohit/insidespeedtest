@@ -739,7 +739,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, "Enter a valid IPv4 or IPv6 client address")
         if addr.is_global or addr.is_multicast or addr.is_unspecified:
             raise HTTPException(422, "Lookup only internal network addresses")
-        return {"client_ip": str(addr), **app.state.mapping.lookup(str(addr))}
+        return {"client_ip": str(addr), **app.state.mapping.lookup(str(addr)),
+                "mapping_diagnostics": app.state.mapping.explain(str(addr))}
 
     @app.get("/api/admin/config/networks.csv", dependencies=[Depends(require_admin)])
     def download_network_config():
@@ -771,19 +772,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {'status': 'revoked'}
 
     @app.get("/api/admin/results", dependencies=[Depends(require_admin)])
-    def results(limit: int = Query(100, ge=1, le=500), school: str | None = None, vlan: str | None = None):
-        sql = "SELECT * FROM results WHERE 1=1"
+    def results(
+        limit: int = Query(100, ge=1, le=500),
+        school: str | None = None, vlan: str | None = None,
+        focus: str = Query("all", pattern="^(all|unmapped|jitter|upload|asymmetry)$"),
+        sort: str = Query("newest", pattern="^(newest|jitter|upload|ratio)$")
+    ):
+        # Server-side filters apply to all stored records, before the limit.
+        clauses = ["1=1"]
         args: list = []
         if school:
-            sql += " AND school=?"
+            clauses.append("school=?")
             args.append(school)
         if vlan:
-            sql += " AND vlan=?"
+            clauses.append("vlan=?")
             args.append(vlan)
-        sql += " ORDER BY id DESC LIMIT ?"
-        args.append(limit)
+        conditions = {
+            "unmapped": "(school='Unknown' OR vlan='Unknown')",
+            "jitter": "jitter_ms>=30",
+            "upload": "upload_mbps<10",
+            "asymmetry": "(download_mbps>=20 AND upload_mbps*4<download_mbps)",
+        }
+        if focus != "all":
+            clauses.append(conditions[focus])
+        where = " WHERE " + " AND ".join(clauses)
+        order = {
+            "newest": "id DESC",
+            "jitter": "jitter_ms DESC, id DESC",
+            "upload": "upload_mbps ASC, id DESC",
+            "ratio": "(CASE WHEN download_mbps>=20 THEN upload_mbps/download_mbps ELSE 1 END) ASC, id DESC",
+        }[sort]
         with connect(settings.db_path) as con:
-            return {"results": [dict(r) for r in con.execute(sql, args).fetchall()]}
+            count = con.execute("SELECT COUNT(*) FROM results" + where, args).fetchone()[0]
+            rows = con.execute("SELECT * FROM results" + where
+                               + " ORDER BY " + order + " LIMIT ?", [*args, limit]).fetchall()
+        return {"results": [dict(r) for r in rows], "matched_count": count,
+                "focus": focus, "sort": sort}
 
     @app.get("/api/admin/summary", dependencies=[Depends(require_admin)])
     def summary():
