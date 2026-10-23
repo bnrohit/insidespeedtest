@@ -15,7 +15,7 @@
   <p class="caption" id="branding-status" role="status"></p>
 </section>
 <section class="panel" aria-label="NOC Internet egress diagnostics">
-  <h2>Outside / NOC Internet egress test</h2>
+  <h2>Outside / NOC Internet egress test <span id="egress-badge" class="health-mark" data-state="unknown" role="status">Not tested</span></h2>
   <p>Measures DNS, HTTPS connection time, small download and upload samples from <strong>this NOC VM</strong> to Cloudflare's public edge, not from each school client. This is a bounded sample, not a full ISP line-rate test. One run district-wide every 2 minutes.</p>
   <div class="actions"><button id="egress-run" class="secondary-btn" type="button">Run VM → Internet test</button><button id="egress-refresh" class="secondary-btn" type="button">Refresh history</button></div>
   <p id="egress-result" class="caption" role="status">Not tested from this browser.</p>
@@ -46,13 +46,27 @@
   <div class="table-scroll"><table><thead><tr><th>AGENT</th><th>SCHOOL</th><th>LAST SAMPLE (UTC)</th><th>STATUS</th><th>CLIENT IP</th><th>↓ Mbps</th><th>↑ Mbps</th><th>LATENCY</th></tr></thead><tbody id="school-agent-rows"></tbody></table></div>
 </section>
 <section class="stats"><div class="panel stat"><small>COMPLETED TESTS</small><strong id="total-tests">—</strong></div><div class="panel stat"><small>SCHOOLS REPORTING</small><strong id="school-count">—</strong></div><div class="panel stat"><small>EMAILS SENT</small><strong id="emails-sent">—</strong></div></section>
-<section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Newest tests first · refreshed on demand</p></div><div class="actions"><input id="school-filter" placeholder="Filter school" aria-label="Filter school"><input id="vlan-filter" placeholder="VLAN" aria-label="Filter VLAN" size="5"><button id="refresh" class="secondary-btn">Refresh</button><a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
+<section class="panel table-panel"><div class="section-head"><div><h2>Results history</h2><p>Filter and sort all stored tests, not only the visible rows.</p></div><div class="actions">
+<input id="school-filter" placeholder="Exact school code" aria-label="Exact school code">
+<input id="vlan-filter" placeholder="VLAN" aria-label="Exact VLAN ID" size="5">
+<label class="history-control">Focus<select id="focus-filter" aria-label="Results focus">
+<option value="all">All tests</option><option value="unmapped">Unmapped school / VLAN</option>
+<option value="jitter">High jitter (30+ ms)</option><option value="upload">Low upload (&lt;10 Mbps)</option>
+<option value="asymmetry">Upload under 25% of download</option>
+</select></label>
+<label class="history-control">Sort<select id="sort-filter" aria-label="Results sort">
+<option value="newest">Newest first</option><option value="jitter">Highest jitter</option>
+<option value="upload">Lowest upload</option><option value="ratio">Lowest upload/download ratio</option>
+</select></label>
+<button id="refresh" class="secondary-btn">Refresh</button>
+<a href="/api/admin/export.csv" class="secondary-btn">Export CSV</a></div></div>
+<p class="caption">Thresholds are triage indicators, not confirmed root causes. Historical school/VLAN labels remain as originally saved.</p>
 <div class="table-scroll"><table><thead><tr><th>WHEN (UTC)</th><th>SCHOOL</th><th>VLAN</th><th>ORIGIN</th><th>CLIENT IP</th><th>DOWN</th><th>UP</th><th>PING</th><th>JITTER</th><th>AUTO EMAIL</th><th>CLIENT EMAIL</th><th>DIAGNOSTICS</th></tr></thead><tbody id="rows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
 <div class="caption" id="admin-status"></div></section>
 <section class="panel table-panel"><h2>School averages</h2><div class="table-scroll"><table><thead><tr><th>SCHOOL</th><th>TESTS</th><th>AVG DOWNLOAD</th><th>AVG UPLOAD</th></tr></thead><tbody id="schools"></tbody></table></div></section>
 <section class="panel table-panel config-area" id="config-area">
   <div class="section-head"><div><h2>Configuration center</h2><p>Changes are stored on this Linux VM, never pushed to GitHub. Saving updates the live service.</p></div></div>
-  <h3>SMTP &amp; admin notification rules</h3>
+  <h3>SMTP &amp; admin notification rules <span id="smtp-badge" class="health-mark" data-state="unknown" role="status">Not configured</span></h3>
   <div class="form-grid">
     <label>SMTP relay host<input id="smtp-host" maxlength="253" autocomplete="off" placeholder="relay.internal.example"></label>
     <label>Port<input id="smtp-port" type="number" min="1" max="65535" value="25"></label>
@@ -71,12 +85,13 @@
   <div id="smtp-status" class="caption" role="status"></div>
   <hr>
   <h3>School and VLAN source-IP inventory</h3>
-  <p>Each row identifies a school/site or a specific VLAN subnet. Only upload verified routes/DHCP subnets. VLAN detection is inferred from the source IP, not read from the browser.</p>
+  <p>Each row identifies a school/site or a specific VLAN subnet. Only upload verified routes/DHCP subnets. VLAN detection is inferred from the source IP, not read from the browser. Saving changes affects new tests; already recorded history is not silently relabeled.</p>
   <div class="form-grid">
     <label>Check an observed school IP<input id="lookup-ip" placeholder="10.x.y.z" autocomplete="off"></label>
     <div class="actions action-bottom"><button id="lookup-btn" class="secondary-btn" type="button">Identify school / VLAN</button></div>
   </div>
   <div id="lookup-result" class="caption" role="status">Use this to confirm that a real client IP maps to the correct campus and VLAN.</div>
+  <p id="lookup-detail" class="caption" role="status">The audit explains which verified CIDRs matched. No school or VLAN is guessed from IP octets.</p>
   <details class="inventory-helper"><summary>Add a school or VLAN subnet</summary>
     <p class="caption">This adds a row to the CSV editor only. Select “Validate &amp; save inventory” afterwards to activate it.</p>
     <div class="form-grid">
@@ -94,7 +109,7 @@
   <div id="network-status" class="caption" role="status"></div>
   <hr>
   <h3>Scheduled school agents (VyOS / Linux)</h3>
-  <p>Regular school visitors need no key. Add a cache server only to run an automated morning test. Each server receives a distinct one-time key bound to its actual source IP.</p>
+  <p>Register each VyOS router or Linux school machine running an automated speed test. Each host receives a unique token bound to its verified observed source IP.</p>
   <div class="form-grid"><label>Server ID<input id="agent-id" placeholder="SCHOOL-CACHE01" maxlength="64"></label><label>Observed source IP (/32 or /128)<input id="agent-cidr" placeholder="10.x.x.x/32"></label></div>
   <div class="actions"><button id="add-agent" class="secondary-btn" type="button">Generate server token</button></div>
   <div id="agent-secret-box" class="agent-secret-box" hidden><strong>Copy now — this token is shown only once.</strong><textarea id="agent-secret" rows="3" readonly></textarea><button id="copy-agent" class="secondary-btn" type="button">Copy token</button></div>
