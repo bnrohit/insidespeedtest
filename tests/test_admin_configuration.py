@@ -133,3 +133,56 @@ def test_plain_smtp_never_keeps_a_password(client):
     assert saved.status_code==200,saved.text
     assert saved.json()['password_configured'] is False
     assert 'some-secret' not in (Path(settings.db_path).parent/'managed'/'smtp.json').read_text()
+
+
+def test_mapping_explanation_reports_exact_matches_not_guesses(client):
+    c,_=client
+    admin=('admin','TESTPASSWORD_LONG_123456')
+    route='/api/admin/config/lookup'
+    assert c.get(route+'?ip=10.12.48.53').status_code==401
+    matched=c.get(route+'?ip=10.12.48.53',auth=admin)
+    assert matched.status_code==200
+    diag=matched.json()['mapping_diagnostics']
+    assert diag['school_match']['cidr']=='10.12.0.0/16'
+    assert diag['vlan_match']['cidr']=='10.12.48.0/21'
+    missing=c.get(route+'?ip=10.64.241.15',auth=admin).json()
+    assert missing['school']=='Unknown' and missing['vlan']=='Unknown'
+    assert missing['mapping_diagnostics']['school_match'] is None
+    assert 'No configured school or VLAN' in missing['mapping_diagnostics']['reason']
+    import ipaddress
+    with pytest.raises(ValueError):
+        ipaddress.ip_network('10.64.241.0/21',strict=True)
+    assert str(ipaddress.ip_network('10.64.241.0/21',strict=False))=='10.64.240.0/21'
+
+
+def test_admin_focus_and_sort_apply_before_limit(client):
+    from app.database import connect
+    c,settings=client
+    admin=('admin','TESTPASSWORD_LONG_123456')
+    samples=[
+       (1,'10.64.241.15','Unknown','Unknown',55.2,4.2,4.0),
+       (2,'10.12.48.53','LNE','48',100.0,90.0,2.0),
+       (3,'10.12.48.54','LNE','48',45.0,8.0,52.0),
+       (4,'10.12.48.55','LNE','48',50.0,25.0,38.0),
+    ]
+    with connect(settings.db_path) as con:
+        for timestamp,ip,school,vlan,down,up,jitter in samples:
+            con.execute("""INSERT INTO results
+              (completed_at,client_ip,school,vlan,network_label,agent_id,
+               download_mbps,upload_mbps,latency_ms,jitter_ms,packet_loss_pct,
+               download_bytes,upload_bytes,email_status)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (timestamp,ip,school,vlan,'Test','',down,up,7.0,jitter,0,100,100,'disabled'))
+    url='/api/admin/results?limit=1&focus=unmapped'
+    assert c.get(url).status_code==401
+    one=c.get(url,auth=admin).json()
+    assert one['matched_count']==1
+    assert one['results'][0]['client_ip']=='10.64.241.15'
+    jitter=c.get('/api/admin/results?focus=jitter&sort=jitter',auth=admin).json()
+    assert jitter['matched_count']==2 and jitter['results'][0]['jitter_ms']==52.0
+    upload=c.get('/api/admin/results?focus=upload&sort=upload',auth=admin).json()
+    assert upload['matched_count']==2 and upload['results'][0]['upload_mbps']==4.2
+    asym=c.get('/api/admin/results?focus=asymmetry&sort=ratio',auth=admin).json()
+    assert asym['matched_count']==2 and asym['results'][0]['upload_mbps']==4.2
+    assert c.get('/api/admin/results?focus=invalid',auth=admin).status_code==422
+    assert c.get('/api/admin/results?sort=invalid',auth=admin).status_code==422
