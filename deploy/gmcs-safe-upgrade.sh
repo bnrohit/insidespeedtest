@@ -19,7 +19,7 @@ SOURCE_REV="$(git -C "$SOURCE" rev-parse HEAD)"
 
 # Explicit application allowlist. Everything else stays exactly as configured on this server.
 FILES=(
- app/admin_auth.py app/client_email.py app/database.py app/emailer.py app/main.py
+ app/admin_auth.py app/client_email.py app/database.py app/emailer.py app/identity.py app/main.py
  app/static/admin.html app/static/admin.js app/static/index.html
  app/static/login.html app/static/login.js app/static/style.css app/static/test.js
  app/static/branding.js app/static/gmcs-logo.png
