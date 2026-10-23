@@ -74,3 +74,26 @@ class IdentityMatcher:
             "vlan": str(int(vlan.vlan)) if vlan else "Unknown",
             "network_label": (vlan.label or "Configured VLAN") if vlan else (school.label or "School site range") if school else "Unmapped client",
         }
+
+    def explain(self, source_ip: str) -> dict:
+        """Show which confirmed inventory ranges matched; intended for admin lookup."""
+        addr = ipaddress.ip_address(source_ip)
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        school = next((e for e in self.entries if e.scope == "school" and addr in e.subnet), None)
+        vlan = next((e for e in self.entries if e.scope == "vlan" and addr in e.subnet), None)
+
+        def describe(entry):
+            if entry is None:
+                return None
+            return {"cidr": str(entry.subnet), "school": entry.school,
+                    "vlan": entry.vlan or None, "label": entry.label}
+
+        if vlan:
+            reason = "A verified VLAN subnet matched and determines the school and VLAN."
+        elif school:
+            reason = "School-wide range matched, but no configured VLAN subnet covers this IP."
+        else:
+            reason = "No configured school or VLAN subnet covers this IP. Verify the observed source IP and routed inventory before adding a range."
+        return {"school_match": describe(school), "vlan_match": describe(vlan),
+                "reason": reason, "inventory_count": len(self.entries)}
