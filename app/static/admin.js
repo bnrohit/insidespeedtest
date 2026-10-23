@@ -1,7 +1,14 @@
 'use strict';
 const el=id=>document.getElementById(id);
 let csrfToken='';
-const cell=(row,value,className)=>{const td=document.createElement('td');td.textContent=String(value??'—');if(className)td.className=className;row.append(td);};
+const serviceStatus=(id,state,message)=>{
+  const node=el(id);node.dataset.state=state;node.textContent=message;
+};
+const asymmetric=r=>{
+  const down=Number(r.download_mbps),up=Number(r.upload_mbps);
+  return Number.isFinite(down)&&Number.isFinite(up)&&down>=20&&up>=0&&up*4<down;
+};
+const cell=(row,value,className)=>{const td=document.createElement('td');td.textContent=String(value??'—');if(className)td.className=className;row.append(td);return td;};
 const req=async url=>{const response=await fetch(url,{cache:'no-store'});if(!response.ok)throw Error(`HTTP ${response.status}`);return response.json();};
 async function refresh(){
   el('admin-status').textContent='Loading…';
@@ -9,6 +16,8 @@ async function refresh(){
     const query=new URLSearchParams({limit:'200'});
     if(el('school-filter').value.trim())query.set('school',el('school-filter').value.trim());
     if(el('vlan-filter').value.trim())query.set('vlan',el('vlan-filter').value.trim());
+    query.set('focus',el('focus-filter').value);
+    query.set('sort',el('sort-filter').value);
     const [summary,results]=await Promise.all([req('/api/admin/summary'),req('/api/admin/results?'+query)]);
     el('total-tests').textContent=summary.total_tests;
     el('school-count').textContent=summary.schools.filter(s=>s.school!=='Unknown').length;
@@ -19,21 +28,36 @@ async function refresh(){
       const tr=document.createElement('tr');
       cell(tr,new Date(r.completed_at*1000).toISOString().replace('T',' ').slice(0,19));
       cell(tr,r.school,'tag'+(r.school==='Unknown'?' unknown':''));
-      cell(tr,r.vlan);cell(tr,r.agent_id || 'Browser');cell(tr,r.client_ip);cell(tr,Number(r.download_mbps).toFixed(1)+' Mbps');
-      cell(tr,Number(r.upload_mbps).toFixed(1)+' Mbps');
+      cell(tr,r.vlan);cell(tr,r.agent_id || 'Browser');cell(tr,r.client_ip);
+      cell(tr,Number(r.download_mbps).toFixed(1)+' Mbps');
+      const uploadCell=cell(tr,Number(r.upload_mbps).toFixed(1)+' Mbps');
+      if(asymmetric(r)){
+        const mark=document.createElement('span');mark.className='triage-hint';mark.textContent=' Asymmetric';
+        const ratio=(100*Number(r.upload_mbps)/Number(r.download_mbps)).toFixed(1);
+        mark.title='Upload is '+ratio+'% of download. Compare wired and Wi-Fi, QoS, routing and upstream policy; this ratio does not prove the cause.';
+        uploadCell.append(mark);
+      }
       cell(tr,Number(r.latency_ms).toFixed(1)+' ms');cell(tr,Number(r.jitter_ms).toFixed(1)+' ms');
       cell(tr,r.email_status);cell(tr,r.client_email_status);
       const detail=document.createElement('td');const open=document.createElement('button');
       open.type='button';open.className='secondary-btn';open.textContent='Diagnose #'+r.id;
-      open.addEventListener('click',()=>openDiagnostics(r.id));detail.append(open);tr.append(detail);
+      open.addEventListener('click',()=>openDiagnostics(r.id));detail.append(open);
+      if(r.school==='Unknown'||r.vlan==='Unknown'){
+        const audit=document.createElement('button');audit.type='button';audit.className='secondary-btn';
+        audit.textContent='Check mapping';audit.title='Audit the active subnet mapping for this source IP';
+        audit.addEventListener('click',()=>auditIp(r.client_ip));detail.append(' ',audit);
+      }
+      tr.append(detail);
       el('rows').append(tr);
     }
     el('schools').replaceChildren();
     for(const r of summary.schools){const tr=document.createElement('tr');cell(tr,r.school);cell(tr,r.tests);cell(tr,r.avg_down+' Mbps');cell(tr,r.avg_up+' Mbps');el('schools').append(tr);}
-    el('admin-status').textContent=`Showing ${results.results.length} most recent matching tests. Email status is updated after SMTP attempt.`;
+    el('admin-status').textContent=`Showing ${results.results.length} of ${results.matched_count} matching tests. Filtering and sorting apply across stored results.`;
   }catch(err){el('admin-status').textContent='Unable to load admin results: '+err.message;}
 }
 el('refresh').addEventListener('click',refresh);
+el('focus-filter').addEventListener('change',refresh);
+el('sort-filter').addEventListener('change',refresh);
 el('school-filter').addEventListener('keydown',e=>{if(e.key==='Enter')refresh();});
 el('vlan-filter').addEventListener('keydown',e=>{if(e.key==='Enter')refresh();});
 
@@ -58,7 +82,8 @@ async function loadConfig(){
     el('smtp-browser').checked=s.email_browser_results;
     el('smtp-agent').checked=s.email_agent_results;
     el('smtp-pass').value='';
-    el('smtp-status').textContent=s.password_configured?'An SMTP password is configured (not shown).':'No SMTP password saved.';
+    el('smtp-status').textContent=s.password_configured?'SMTP credentials stored privately. Delivery not verified.':'No SMTP password saved (normal for some trusted relays).';
+    serviceStatus('smtp-badge',s.host&&s.sender&&s.recipients?'pending':'unknown',s.host&&s.sender&&s.recipients?'Configured, unverified':'Not configured');
     el('network-csv').value=n.csv_text;
     el('network-status').textContent=`${n.count} school/VLAN records loaded from private VM storage.`;
     drawAgents(a.agents);
@@ -77,14 +102,15 @@ el('save-smtp').addEventListener('click',async()=>{
     });
     el('smtp-pass').value='';el('smtp-clear-pass').checked=false;
     el('smtp-status').textContent=`Saved on VM. Password configured: ${s.password_configured?'yes':'no'}. No email sent.`;
-  }catch(err){el('smtp-status').textContent='NOT saved: '+err.message;}
+    serviceStatus('smtp-badge',s.host&&s.sender&&s.recipients?'pending':'unknown',s.host&&s.sender&&s.recipients?'Configured, unverified':'Not configured');
+  }catch(err){el('smtp-status').textContent='NOT saved: '+err.message;serviceStatus('smtp-badge','issue','Save failed');}
   finally{btn.disabled=false;}
 });
 el('test-smtp').addEventListener('click',async()=>{
   const btn=el('test-smtp');btn.disabled=true;
   try{const s=await postConfig('/api/admin/config/smtp/test','POST',{});
-      el('smtp-status').textContent=s.message;}
-  catch(err){el('smtp-status').textContent='Test failed: '+err.message;}
+      el('smtp-status').textContent=s.message;serviceStatus('smtp-badge','ok','Relay accepted');}
+  catch(err){el('smtp-status').textContent='Test failed: '+err.message;serviceStatus('smtp-badge','issue','Test failed');}
   finally{btn.disabled=false;}
 });
 el('save-networks').addEventListener('click',async()=>{
@@ -128,17 +154,23 @@ el('copy-agent').addEventListener('click',async()=>{
   catch(err){el('agents-status').textContent='Select and copy token manually.';}
 });
 
-// Query the exact, active mapping without touching production networking.
-el('lookup-btn').addEventListener('click',async()=>{
-  const ip=el('lookup-ip').value.trim();
+// Audit only the current verified inventory; never infer school identity from an IP octet.
+async function auditIp(ip){
   if(!ip){el('lookup-result').textContent='Enter a client IP first.';return;}
+  el('lookup-ip').value=ip;
+  el('lookup-result').textContent='Checking current inventory for '+ip+'…';
+  el('lookup-detail').textContent='';
   try{
-    const response=await fetch('/api/admin/config/lookup?ip='+encodeURIComponent(ip),{cache:'no-store'});
-    const data=await response.json();
-    if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Lookup failed');
-    el('lookup-result').textContent=`${data.client_ip} → ${data.school} / VLAN ${data.vlan} — ${data.network_label}`;
+    const data=await req('/api/admin/config/lookup?ip='+encodeURIComponent(ip));
+    el('lookup-result').textContent=data.client_ip+' → '+data.school+' / VLAN '+data.vlan+' — '+data.network_label;
+    const audit=data.mapping_diagnostics;
+    const school=audit.school_match ? audit.school_match.cidr+' ('+audit.school_match.school+')' : 'none';
+    const vlan=audit.vlan_match ? audit.vlan_match.cidr+' (VLAN '+audit.vlan_match.vlan+')' : 'none';
+    el('lookup-detail').textContent=audit.reason+' School range: '+school+'. VLAN range: '+vlan+'. Active inventory rows: '+audit.inventory_count+'. Existing saved history is not relabeled.';
   }catch(err){el('lookup-result').textContent='Lookup failed: '+err.message;}
-});
+  el('lookup-ip').scrollIntoView({behavior:'smooth',block:'center'});
+}
+el('lookup-btn').addEventListener('click',()=>auditIp(el('lookup-ip').value.trim()));
 const csvEscape=(s)=>'"'+s.replaceAll('"','""')+'"';
 el('append-mapping').addEventListener('click',()=>{
   const scope=el('mapping-scope').value;
@@ -214,8 +246,9 @@ async function refreshEgress(){
     for(const r of x.samples){const tr=document.createElement('tr');
       for(const v of [new Date(r.at*1000).toISOString().replace('T',' ').slice(0,19),r.status,r.dns_ms,r.tls_ms,r.download_mbps,r.upload_mbps])cell(tr,v);el('egress-rows').append(tr);
     }
-    if(!x.samples.length)el('egress-result').textContent='No VM Internet checks recorded yet.';
-  }catch(e){el('egress-result').textContent='Could not load checks: '+e.message;}
+    if(!x.samples.length){el('egress-result').textContent='No VM Internet checks recorded yet.';serviceStatus('egress-badge','unknown','Not tested');}
+    else{const last=x.samples[0];serviceStatus('egress-badge',last.status==='ok'?'ok':'issue',last.status==='ok'?'Last test passed':'Last test failed');}
+  }catch(e){el('egress-result').textContent='Could not load checks: '+e.message;serviceStatus('egress-badge','issue','History unavailable');}
 }
 el('egress-refresh').addEventListener('click',refreshEgress);
 el('egress-run').addEventListener('click',async()=>{
@@ -226,7 +259,7 @@ el('egress-run').addEventListener('click',async()=>{
       ? `NOC VM → ${result.target}: DNS ${result.dns_ms} ms, HTTPS ${result.tls_ms} ms, ↓ ${result.download_mbps} Mbps, ↑ ${result.upload_mbps} Mbps (4 MiB down / 1 MiB up).`
       : 'Internet test failed: '+result.detail;
     await refreshEgress();
-  }catch(e){el('egress-result').textContent='Test not accepted: '+e.message;}
+  }catch(e){el('egress-result').textContent='Test not accepted: '+e.message;serviceStatus('egress-badge','issue','Check rejected');}
   finally{button.disabled=false;}
 });
 
