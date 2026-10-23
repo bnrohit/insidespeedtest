@@ -98,3 +98,18 @@ SQLite tables are backward-compatible with the prior application version.
 logo, sign out, verify clients cannot edit; run a VM → Cloudflare egress probe from
 an approved admin IP. A browser's direct-Internet results and the VM egress
 results will differ when network paths and ISPs differ.
+
+
+## Admin dashboard triage and inventory audit
+
+The admin results endpoint filters the full stored history before applying the display limit. Focus choices: unmapped school/VLAN, jitter >=30 ms, upload <10 Mbps, and upload-to-download ratio under 25% when download >=20 Mbps. Sort options use known safe expressions: newest, highest jitter, lowest upload, and worst ratio.
+
+The school/VLAN lookup displays verified matching school and VLAN CIDRs, or explains what is absent. The Check mapping shortcut on unmapped results uses that authenticated endpoint. Diagnose #ID already fills the ID input and opens the report directly. Inventory changes classify new tests only; existing result history is not silently rewritten. A proposed subnet must be verified against routing and DHCP records. 10.64.241.0/21 is not aligned (the containing /21 is 10.64.240.0/21), but neither network nor school identity should be assumed without verification.
+
+NOC egress and SMTP status indicators distinguish not configured, last checked successfully, failure, and configured but unverified. SMTP relay acceptance does not prove mailbox delivery. No SMTP password can be normal for an authorized relay. Asymmetric transfer speeds are investigation prompts, not proof of Wi-Fi, QoS, ISP, routing, or transceiver faults.
+
+### Deployment notes
+
+The controlled upgrade script deploy/gmcs-safe-upgrade.sh now includes app/identity.py along with app/main.py, admin JS/HTML and CSS. Use the existing separate upstream checkout, inspect the live Compose path, and run the audited upgrade only on the previously documented production host. Review and retain private inventories, tokens, database, nginx configurations, and rollback records.
+
+Disk assessment: recent server output shows approximately 27 GB free, with zero Docker build cache and a healthy GMCS speed-test container. The old speed-test installer archives and extracted copies occupy less than 1 MB altogether; deleting them is unnecessary for disk capacity. Investigate why ~/insidespeedtest is shown as 4 KB despite being the Docker Compose working directory before moving or deleting that path.
