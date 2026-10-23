@@ -186,3 +186,17 @@ def test_admin_focus_and_sort_apply_before_limit(client):
     assert asym['matched_count']==2 and asym['results'][0]['upload_mbps']==4.2
     assert c.get('/api/admin/results?focus=invalid',auth=admin).status_code==422
     assert c.get('/api/admin/results?sort=invalid',auth=admin).status_code==422
+
+
+def test_admin_ui_contract_and_upgrade_includes_mapping_audit():
+    root=Path(__file__).resolve().parents[1]
+    page=(root/'app/static/admin.html').read_text()
+    client=(root/'app/static/admin.js').read_text()
+    script=(root/'deploy/gmcs-safe-upgrade.sh').read_text()
+    for name in ('focus-filter','sort-filter','egress-badge','smtp-badge','lookup-detail'):
+        assert 'id="'+name+'"' in page
+        assert "'"+name+"'" in client
+    assert "auditIp(r.client_ip)" in client
+    assert "openDiagnostics(r.id)" in client
+    assert "asymmetric(r)" in client
+    assert "app/identity.py" in script
